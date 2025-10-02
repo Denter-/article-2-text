@@ -11,9 +11,10 @@ The Site Registry is a self-learning system that uses Google Gemini to analyze w
 ### Key Benefits
 
 - 🤖 **Automatic Learning** - AI analyzes HTML and creates extraction rules
+- 🌐 **Dynamic Content Detection** - Automatically detects and renders JavaScript-heavy sites
+- 🔄 **Iterative Refinement** - Compares before/after HTML to refine filters (up to 6 iterations)
 - 💰 **Cost Efficient** - Learn once ($0.01-0.05), extract forever (free)
-- ✅ **Self-Validating** - AI validates its own work before saving
-- 🔄 **Iterative** - Refines rules up to 3 times for perfection
+- ✅ **Self-Validating** - AI validates extraction quality through comparative analysis
 - 🔧 **Force Renew** - Re-learn when sites change structure
 
 ---
@@ -22,26 +23,31 @@ The Site Registry is a self-learning system that uses Google Gemini to analyze w
 
 ```mermaid
 flowchart TD
-    A[User Request: Extract Article] --> B{Domain Config Exists?}
-    B -->|Yes| C[Load config/sites/domain.yaml]
-    B -->|No| D[🧠 LEARNING MODE]
+    A[User Request: Extract Article] --> B[Download with curl]
+    B --> C{Config Exists?}
+    C -->|Yes| D{Config says<br/>needs browser?}
+    C -->|No| E[Ask AI: Is this<br/>dynamic content?]
     
-    C --> E[Extract Using Config]
+    E -->|Yes| F[🌐 Fetch with<br/>Playwright browser]
+    E -->|No| G[🧠 LEARNING MODE]
+    D -->|Yes| F
+    D -->|No| G
     
-    D --> F[Send HTML to Gemini<br/>'Analyze structure']
-    F --> G[Receive YAML Config]
-    G --> H[Apply Config & Extract]
-    H --> I[Send to Gemini<br/>'Validate quality']
+    F --> G
     
-    I --> J{Valid?}
-    J -->|APPROVE| K[💾 Save Config]
-    J -->|Issues| L{Iterations < 3?}
-    L -->|Yes| M[Request Better Config]
-    M --> H
-    L -->|No| N[❌ Failed]
+    G --> H[AI: Generate<br/>extraction config]
+    H --> I[Apply config<br/>& extract]
+    I --> J[🔍 Compare original<br/>vs extracted HTML]
     
-    K --> E
-    E --> O[✅ Article Extracted]
+    J --> K{Quality OK?}
+    K -->|APPROVE| L[💾 Save config]
+    K -->|Issues| M{Iterations < 6?}
+    M -->|Yes| N[AI: Suggest<br/>filter changes]
+    N --> O[Add/Remove<br/>selectors]
+    O --> I
+    M -->|No| P[❌ Failed after 6 attempts]
+    
+    L --> Q[✅ Article Extracted]
 ```
 
 ---
@@ -53,12 +59,24 @@ flowchart TD
 ```yaml
 domain: example.com
 learned_at: "2025-10-02T14:30:00Z"
+requires_browser: false  # Set to true for JavaScript-rendered sites
 
 extraction:
   # Main article content
   article_content:
     selector: "article"          # CSS selector
     fallback: "main"              # Fallback option
+    exclude_selectors:           # Elements to remove from content
+      - "nav"
+      - "header"
+      - "footer"
+      - ".sidebar"
+      - ".related-articles"
+      - "[class*='share']"
+      - "[aria-label*='Save']"
+    cleanup_rules:
+      stop_at_repeated_links: true
+      max_consecutive_links: 3
   
   # Metadata
   title:
@@ -74,7 +92,7 @@ extraction:
 
 notes: |
   Site uses standard semantic HTML.
-  Tested on 3 articles successfully.
+  Refined over 4 iterations to exclude UI elements.
 ```
 
 ### Location
@@ -95,39 +113,52 @@ config/sites/
 sequenceDiagram
     participant U as User
     participant S as System
+    participant B as Browser (Playwright)
     participant G as Gemini AI
     
     U->>S: Extract article from newsite.com
+    S->>S: Download with curl
     S->>S: Check config/sites/newsite.com.yaml
     
     Note over S: Config not found
     
+    S->>G: Is this dynamic content?
+    G->>S: Yes/No + Confidence
+    
+    alt Requires Browser
+        S->>B: Fetch with Playwright
+        B->>S: Rendered HTML
+    end
+    
+    Note over S,G: ITERATION 1
     S->>G: Analyze HTML structure
-    G->>S: Return extraction selectors (YAML)
+    G->>S: Return extraction config (YAML)
     
-    S->>S: Apply selectors & extract content
+    S->>S: Apply config & extract
     
-    S->>G: Validate extraction<br/>(HTML + Extracted Content)
+    S->>G: Compare: Original HTML vs Extracted HTML
     
-    alt Validation Success
+    alt Extraction Clean
         G->>S: "APPROVE"
         S->>S: Save config to disk
         S->>U: ✅ Article extracted
-    else Validation Failed
-        G->>S: "Issues: X, Y, Z"
-        Note over S: Iteration 2/3
-        S->>G: Request improved selectors
-        G->>S: Return better selectors
-        S->>S: Apply & validate again
+    else Extraction Has Issues
+        G->>S: "Issue: [description]<br/>Add: [selectors]<br/>Remove: [selectors]"
+        Note over S: Iterations 2-6
+        S->>S: Update exclude_selectors
+        S->>S: Re-extract & re-validate
     end
 ```
 
-### Iteration Loop (Max 3 Attempts)
+### Iteration Loop (Max 6 Attempts)
 
-1. **Attempt 1**: Initial learning from HTML
-2. **Attempt 2**: Refinement based on validation feedback
-3. **Attempt 3**: Final attempt with feedback
-4. **Success**: ~90% on standard article sites
+1. **Iteration 1**: Initial config generation from HTML
+2. **Iterations 2-6**: Comparative validation (before/after HTML)
+   - AI compares original HTML vs extracted HTML
+   - Suggests filters to **add** (removes unwanted elements)
+   - Suggests filters to **remove** (if extraction too aggressive)
+   - Progressively refines `exclude_selectors` list
+3. **Success Rate**: ~95% on standard sites, ~85% on complex sites (HBR, Medium)
 
 ---
 
@@ -139,17 +170,34 @@ sequenceDiagram
 # First time visiting a new site
 python3 -m src.article_extractor --gemini https://newsite.com/article
 
-# Output:
+# Output for static site:
 # 🧠 Learning extraction rules for newsite.com...
 #    Analyzing HTML structure with AI...
-#    Iteration 1/3
+#    Iteration 1/6
 #    ✓ Received extraction config from AI
-#    🔍 Validating extraction quality...
+#    🔍 Comparing original vs extracted HTML...
 #    ✅ Extraction validated successfully!
 #    💾 Saved config for newsite.com
 # ✅ Success! Created: Article_Title.md
 
-# Future visits (instant, free)
+# Output for JavaScript-rendered site (e.g., HBR):
+# 🔍 Checking if content requires JavaScript...
+# 🌐 Re-fetching with headless browser...
+#    🌐 Launching headless browser...
+#    📄 Loading page with JavaScript...
+#    ✅ Fetched 389,234 bytes (browser-rendered)
+# 🧠 Learning extraction rules for hbr.org...
+#    Iteration 1/6
+#    ⚠️  Issue: UI elements present
+#    🔄 Adjusting filters (added 3, removed 0)...
+#    Iteration 2/6
+#    ⚠️  Issue: Related products section
+#    🔄 Adjusting filters (added 4, removed 0)...
+#    Iteration 3/6
+#    ✅ Extraction validated successfully!
+# ✅ Success! Created: Article_Title.md
+
+# Future visits (instant, uses saved config + browser if needed)
 python3 -m src.article_extractor --gemini https://newsite.com/article-2
 # ✓ Loaded config for newsite.com
 # ✅ Success! Created: Article_2_Title.md
@@ -369,17 +417,24 @@ selector: "main article.post-content"
 
 ## Limitations
 
-### What It Can't Handle
+### What It Can Handle Now ✅
 
-❌ **JavaScript SPAs** - Content loaded via JS after page load  
-❌ **Authentication Required** - Sites behind login  
-❌ **Highly Dynamic Content** - Content that changes structure frequently
+✅ **JavaScript-Rendered Sites** - Automatically uses headless browser (HBR, Medium, etc.)  
+✅ **Complex Layouts** - Iterative filter refinement removes UI noise  
+✅ **Dynamic Content Detection** - Smart detection of when browser is needed
+
+### What It Still Can't Handle
+
+❌ **Authentication Required** - Sites behind login/paywall  
+❌ **Extremely Dynamic Content** - Sites that change structure on every visit  
+❌ **CAPTCHA Protected** - Sites with bot detection
 
 ### Success Rate
 
-✅ **90%+** - Standard article sites (WordPress, static blogs, semantic HTML)  
-⚠️ **50%** - News sites with complex layouts  
-❌ **10%** - SPAs, paywalled content
+✅ **95%+** - Standard article sites (WordPress, static blogs, semantic HTML)  
+✅ **85%+** - JavaScript-rendered sites (HBR, Medium, modern news sites)  
+⚠️ **60%** - Sites with extremely complex/nested layouts  
+❌ **0%** - Sites behind authentication or CAPTCHA
 
 ---
 

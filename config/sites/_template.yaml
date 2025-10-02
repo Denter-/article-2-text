@@ -9,8 +9,24 @@ learned_at: "2025-10-02T14:30:00Z"
 extraction:
   # Main article content
   article_content:
-    selector: "article"          # CSS selector (preferred)
-    fallback: "main"              # Fallback if primary fails
+    selector: "article .main-content"  # CSS selector (preferred)
+    fallback: "article"                # Fallback if primary fails
+    
+    # NEW: Exclude specific elements from extracted content
+    exclude_selectors:
+      - ".w-dyn-list"              # Webflow dynamic lists (common for related articles)
+      - ".related-articles"        # Related articles sections
+      - ".blog-recommendations"    # Recommendation widgets
+      - "[class*='collection-list']"  # Any collection list
+      - ".sidebar"                 # Sidebars
+      - ".comments"                # Comments sections
+    
+    # NEW: Post-processing cleanup rules
+    cleanup_rules:
+      stop_at_repeated_links: true    # Stop when encountering 3+ consecutive article links
+      max_consecutive_links: 3
+      remove_patterns:                 # Regex patterns to remove
+        - "Read more\\s*\\[/[^\\]]+\\]"  # Remove "Read more [/url]" markdown
   
   # Metadata extraction
   title:
@@ -34,4 +50,8 @@ extraction:
 notes: |
   Additional information about site structure,
   known issues, or special considerations.
+  
+  NEW FEATURES:
+  - exclude_selectors: Remove specific elements from content (like related articles)
+  - cleanup_rules: Post-processing to remove patterns and stop at article boundaries
 

@@ -4,4 +4,8 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 pyyaml>=6.0
+playwright>=1.40.0
+
+# After installing requirements, install Playwright browsers:
+# playwright install chromium
 

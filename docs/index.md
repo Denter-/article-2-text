@@ -50,9 +50,16 @@ Complete documentation for the Article Extractor with AI Image Descriptions.
 
 - **[Site Registry (Self-Learning)](technical/site-registry.md)**
   - Automatic learning with AI
+  - Iterative filter refinement
   - Configuration format
   - Cost analysis
   - Usage guide
+
+- **[Dynamic Content Detection](technical/dynamic-content-detection.md)**
+  - JavaScript-rendered sites
+  - Headless browser support
+  - Smart detection system
+  - Performance comparison
 
 - **[Site Compatibility](technical/site-compatibility.md)**
   - Which sites work out of the box
@@ -68,8 +75,10 @@ Complete documentation for the Article Extractor with AI Image Descriptions.
 
 - **Extract my first article** → [Quick Start](getting-started/quickstart.md)
 - **Set up AI descriptions** → [Gemini API Setup](getting-started/setup-gemini.md)
+- **Install browser support** → [Installation Guide](getting-started/installation.md)
 - **Process many articles** → [Batch Processing](usage/batch-processing.md)
 - **Understand self-learning** → [Site Registry](technical/site-registry.md)
+- **Handle JavaScript sites** → [Dynamic Content Detection](technical/dynamic-content-detection.md)
 - **Check site compatibility** → [Site Compatibility](technical/site-compatibility.md)
 - **Fix an error** → [Basic Usage - Error Handling](usage/basic-usage.md)
 
@@ -81,16 +90,20 @@ Complete documentation for the Article Extractor with AI Image Descriptions.
 |---------|-------|--------|
 | Getting Started | 3 | ✅ Complete |
 | Usage Guides | 2 | ✅ Complete |
-| Technical Docs | 2 | ✅ Complete |
+| Technical Docs | 3 | ✅ Complete |
 
-**Total: 8 documentation files** (clean and focused)
+**Total: 9 documentation files** (clean and focused)
+
+**Latest Update:** Added Dynamic Content Detection guide (browser rendering, smart detection)
 
 ---
 
 ## 🆘 Getting Help
 
 - **Installation issues?** → [Installation Guide](getting-started/installation.md)
+- **Browser/Playwright errors?** → [Installation Guide - Troubleshooting](getting-started/installation.md#troubleshooting)
 - **API errors?** → [Gemini API Setup](getting-started/setup-gemini.md)
+- **JavaScript site not working?** → [Dynamic Content Detection](technical/dynamic-content-detection.md)
 - **Site not working?** → [Site Compatibility](technical/site-compatibility.md)
 - **Can't find what you need?** → [Back to README](../README.md)
 

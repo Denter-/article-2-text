@@ -1,0 +1,67 @@
+# Harvard Business Review extraction configuration
+# Manually created: 2025-10-02
+# Site uses React with complex nested structure
+
+domain: hbr.org
+requires_browser: true
+
+extraction:
+  article_content:
+    selector: "article"
+    exclude_selectors:
+      # Navigation (at start)
+      - "nav"
+      - "header"
+      - ".Header-module_header__qxHtx"
+      - "[class*='Header-module']"
+      - "[class*='MegaMenu']"
+      
+      # Social sharing buttons (throughout)
+      - "[class*='PageUtils']"
+      - "[aria-label*='Share']"
+      - "[aria-label*='Post']"
+      - "[data-analytics*='share']"
+      - "button[aria-label*='Save']"
+      - "button[aria-label*='Print']"
+      
+      # Recommendations and related content (at end)
+      - "[class*='recommended']"
+      - "[class*='Recommended']"  
+      - "[class*='related']"
+      - "[class*='Partner']"
+      - "[data-testid*='recommended']"
+      
+      # Ads and promotional content
+      - "[class*='ad-container']"
+      - "[class*='Advertisement']"
+      - "iframe[title*='Advertisement']"
+      - "[role='complementary']"
+      
+      # Product promotions ("Readers Also Viewed")
+      - "[href*='/product/']"
+      - "a[href*='ab=at_art_idp']"
+      
+      # Leader profile quiz popup
+      - "[class*='LeaderProfile']"
+      - "[href*='leaderprofile']"
+    
+    cleanup_rules:
+      stop_at_repeated_links: true
+      max_consecutive_links: 3
+  
+  title:
+    og_meta: "og:title"
+    fallback_selector: "h1"
+  
+  author:
+    fallback_selector: "[class*='author']"
+  
+  date_published:
+    og_meta: "article:published_time"
+
+notes: |
+  HBR uses React with all content inside a single <article> tag.
+  Requires aggressive exclusion of UI elements.
+  Recommendations section at end has inconsistent class names.
+  Browser rendering required due to paywall/JS-heavy structure.
+

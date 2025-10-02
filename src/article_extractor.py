@@ -14,10 +14,19 @@ import os
 import time
 import urllib.request
 import logging
+import asyncio
 from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime
 import subprocess
+
+# Import site registry for self-learning
+try:
+    from .site_registry import SiteRegistry
+except ImportError:
+    # Fallback for direct execution
+    import site_registry
+    SiteRegistry = site_registry.SiteRegistry
 
 # Suppress gRPC/ALTS warnings from Google APIs
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
@@ -36,14 +45,18 @@ except ImportError:
 
 
 class ArticleExtractor:
-    def __init__(self, output_dir=".", use_gemini=False, gemini_api_key=None, log_file=None):
+    def __init__(self, output_dir="results", use_gemini=False, gemini_api_key=None, log_file=None, force_renew=False):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.use_gemini = use_gemini and GEMINI_AVAILABLE
         self.gemini_model = None
+        self.force_renew = force_renew
         
         # Setup logging
         self.setup_logging(log_file)
+        
+        # Initialize site registry for self-learning
+        self.site_registry = SiteRegistry(use_gemini=use_gemini) if use_gemini else None
         
         if self.use_gemini:
             if not gemini_api_key:
@@ -125,7 +138,16 @@ class ArticleExtractor:
             return False
     
     def generate_gemini_description(self, image_url, context_before, context_after):
-        """Generate image description using Gemini Vision API"""
+        """Generate image description using Gemini Vision API (synchronous wrapper)"""
+        if not self.use_gemini or not self.gemini_model:
+            return None
+        
+        # This is now just a wrapper for the async version
+        # Used when called individually (shouldn't happen in normal flow)
+        return asyncio.run(self._generate_gemini_description_async(image_url, context_before, context_after))
+    
+    async def _generate_gemini_description_async(self, image_url, context_before, context_after, max_retries=3):
+        """Generate image description using Gemini Vision API (async with retry logic)"""
         if not self.use_gemini or not self.gemini_model:
             return None
         
@@ -143,15 +165,15 @@ class ArticleExtractor:
         if not self.download_image(image_url, image_path):
             return None
         
-        try:
-            # Load image
-            img = Image.open(image_path)
-            
-            # Detect article language from context
-            context_sample = (context_before + context_after)[:500]
-            
-            # Create comprehensive prompt
-            system_context = """You are an expert at analyzing business charts, diagrams, and visualizations for SaaS metrics and business analytics.
+        # Retry logic
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                # Load image
+                img = Image.open(image_path)
+                
+                # Create comprehensive prompt
+                system_context = """You are an expert at analyzing business charts, diagrams, and visualizations for SaaS metrics and business analytics.
 
 Your task is to create detailed, accessible text descriptions that will replace images in a text-only document.
 
@@ -188,7 +210,7 @@ CRITICAL FORMATTING RULES:
 
 The surrounding article context is provided to help you understand what the visualization illustrates."""
 
-            user_prompt = f"""Analyze this image and determine if it's a content-relevant visualization or a UI/navigation element.
+                user_prompt = f"""Analyze this image and determine if it's a content-relevant visualization or a UI/navigation element.
 
 ARTICLE CONTEXT BEFORE:
 {context_before[:800]}
@@ -201,29 +223,78 @@ If it's a UI element, button, logo, or navigation graphic, respond with "SKIP: [
 If it's a business chart, graph, table, diagram, or formula, provide a comprehensive description.
 IMPORTANT: Write in the same language as the article text above. Do NOT include any URLs or image paths."""
 
-            full_prompt = system_context + "\n\n" + user_prompt
+                full_prompt = system_context + "\n\n" + user_prompt
+                
+                # Generate description (run in executor to avoid blocking)
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.gemini_model.generate_content([full_prompt, img])
+                )
+                description = response.text.strip()
+                
+                # Clean up
+                image_path.unlink(missing_ok=True)
+                
+                # Check if AI decided to skip this image
+                if description.startswith("SKIP:"):
+                    self.logger.info(f"Skipped UI element: {image_url}")
+                    return f"[UI Element - {description[5:].strip()}]"
+                
+                self.logger.info(f"Generated description for {image_url}: {len(description)} chars")
+                return description
+                
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {image_url}: {e}")
+                
+                if attempt < max_retries - 1:
+                    # Wait before retry (exponential backoff)
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Final attempt failed
+                    self.logger.error(f"All {max_retries} attempts failed for {image_url}: {last_error}")
+                    print(f"   ⚠️  Gemini API error after {max_retries} retries: {last_error}")
+                    image_path.unlink(missing_ok=True)
+                    return None
+        
+        return None
+    
+    async def _process_images_parallel(self, images_data):
+        """Process all images in parallel with staggered start"""
+        if not self.use_gemini or not images_data:
+            return {}
+        
+        print(f"🤖 Processing {len(images_data)} images in parallel with Gemini Vision API...")
+        
+        tasks = []
+        for i, img_data in enumerate(images_data):
+            # Create task
+            task = self._generate_gemini_description_async(
+                img_data['src'],
+                img_data['context_before'],
+                img_data['context_after']
+            )
+            tasks.append(task)
             
-            # Generate description
-            response = self.gemini_model.generate_content([full_prompt, img])
-            description = response.text.strip()
-            
-            # Clean up
-            image_path.unlink(missing_ok=True)
-            
-            # Check if AI decided to skip this image
-            if description.startswith("SKIP:"):
-                # Return a minimal note instead of full description
-                self.logger.info(f"Skipped UI element: {image_url}")
-                return f"[UI Element - {description[5:].strip()}]"
-            
-            self.logger.info(f"Generated description for {image_url}: {len(description)} chars")
-            return description
-            
-        except Exception as e:
-            self.logger.error(f"Error generating description for {image_url}: {e}")
-            print(f"   ⚠️  Gemini API error: {e}")
-            image_path.unlink(missing_ok=True)
-            return None
+            # Stagger the start of requests (0.1s delay between each)
+            if i < len(images_data) - 1:
+                await asyncio.sleep(0.1)
+        
+        # Wait for all tasks to complete
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Build a dictionary mapping image URLs to descriptions
+        descriptions_map = {}
+        for img_data, result in zip(images_data, results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Failed to process {img_data['src']}: {result}")
+                descriptions_map[img_data['src']] = None
+            else:
+                descriptions_map[img_data['src']] = result
+        
+        return descriptions_map
     
     def extract_metadata(self, html_content):
         """Extract article metadata (title, author, date)"""
@@ -255,11 +326,35 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
         
         return metadata
     
-    def extract_article_content(self, html_content):
-        """Extract main article content from HTML"""
-        # Try multiple strategies
+    def extract_article_content(self, html_content, url=None, requires_browser=False):
+        """Extract main article content from HTML using site registry"""
         
-        # Strategy 1: Elementor widget content (common on this site)
+        # Try site registry first (self-learning)
+        if self.site_registry and url:
+            domain = self.site_registry.get_domain_from_url(url)
+            
+            # Load existing config or learn new one
+            config = self.site_registry.load_config(domain)
+            
+            if not config and self.use_gemini:
+                # Learn from this site
+                success, config, error = self.site_registry.learn_from_html(
+                    url, html_content, force=self.force_renew, requires_browser=requires_browser
+                )
+                if not success:
+                    self.logger.warning(f"Failed to learn site structure: {error}")
+                    # Fall through to fallback strategies
+            
+            # Try extraction with config
+            if config:
+                content = self.site_registry.extract_with_config(html_content, config)
+                if content:
+                    return content
+        
+        # Fallback strategies (for when registry not available or failed)
+        self.logger.info("Using fallback extraction strategies")
+        
+        # Strategy 1: Elementor widget content (common on ForEntrepreneurs)
         match = re.search(
             r'<h[12][^>]*>.*?(<h[12][^>]*>.*?</h[12]>.*?)(?=<footer|<div[^>]*class="[^"]*comments|<div[^>]*id="comments)',
             html_content,
@@ -315,29 +410,16 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
         
         return images
     
-    def generate_image_description(self, img_data, img_index, total_images):
-        """Generate a description for an image (with Gemini if enabled)"""
+    def generate_image_description(self, img_data, img_index, total_images, gemini_desc=None):
+        """Generate a description for an image (using pre-generated Gemini description if available)"""
         
-        # Try Gemini first if enabled
-        if self.use_gemini:
-            print(f"   🤖 Generating AI description for image {img_index + 1}/{total_images}...")
-            gemini_desc = self.generate_gemini_description(
-                img_data['src'],
-                img_data['context_before'],
-                img_data['context_after']
-            )
-            
-            if gemini_desc:
-                # Format nicely
-                desc = f"\n\n**[AI-Generated Image Description {img_index + 1}/{total_images}]**\n\n"
-                desc += gemini_desc
-                desc += f"\n\n*[Original image: {img_data['src']}]*\n\n"
-                
-                # Rate limiting
-                if img_index < total_images - 1:
-                    time.sleep(2)  # 2 second pause between API calls
-                
-                return desc
+        # Use pre-generated Gemini description if provided
+        if gemini_desc:
+            # Format nicely
+            desc = f"\n\n**[AI-Generated Image Description {img_index + 1}/{total_images}]**\n\n"
+            desc += gemini_desc
+            desc += f"\n\n*[Original image: {img_data['src']}]*\n\n"
+            return desc
         
         # Fallback to context-based description
         desc_parts = []
@@ -386,7 +468,7 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
         text = text.replace('\u2026', '...')
         return text
     
-    def html_to_markdown(self, html_content, images_data):
+    def html_to_markdown(self, html_content, images_data, gemini_descriptions=None):
         """Convert HTML to Markdown with image descriptions"""
         text = html_content
         
@@ -448,7 +530,11 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
         # Replace image placeholders with descriptions
         for i, img in enumerate(sorted(images_data, key=lambda x: x['position'])):
             placeholder = f"___IMAGE_{i}___"
-            description = self.generate_image_description(img, i, len(images_data))
+            # Get pre-generated Gemini description if available
+            gemini_desc = None
+            if gemini_descriptions and img['src'] in gemini_descriptions:
+                gemini_desc = gemini_descriptions[img['src']]
+            description = self.generate_image_description(img, i, len(images_data), gemini_desc)
             text = text.replace(placeholder, description)
         
         # Clean up whitespace
@@ -506,25 +592,58 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
     def process_article(self, url):
         """Main processing pipeline"""
         try:
-            # Download
+            # Download with curl first (fast)
             html_content = self.download_article(url)
+            
+            # Smart detection: Check if content looks dynamic/incomplete
+            requires_browser = False
+            if self.site_registry and self.use_gemini:
+                # Check the site config first
+                domain = self.site_registry.get_domain_from_url(url)
+                config = self.site_registry.load_config(domain)
+                
+                if config and config.get('requires_browser'):
+                    # Config says we need browser for this site
+                    requires_browser = True
+                    print("   ℹ️  Site config indicates dynamic content")
+                elif not config:
+                    # No config yet - ask LLM to check the HTML
+                    print("🔍 Checking if content requires JavaScript...")
+                    is_dynamic, reason = self.site_registry.check_if_dynamic_content(html_content, url)
+                    requires_browser = is_dynamic
+            
+            # Re-fetch with browser if needed
+            if requires_browser:
+                print("🌐 Re-fetching with headless browser...")
+                success, browser_html, error = self.site_registry.fetch_with_browser(url)
+                if success:
+                    html_content = browser_html
+                else:
+                    print(f"   ⚠️  Browser fetch failed: {error}")
+                    print("   📄 Continuing with curl version...")
             
             # Extract components
             print("📝 Extracting metadata...")
             metadata = self.extract_metadata(html_content)
             
             print("📄 Extracting article content...")
-            article_html = self.extract_article_content(html_content)
+            article_html = self.extract_article_content(html_content, url=url, requires_browser=requires_browser)
             
             print("🖼️  Extracting images...")
             images = self.extract_images(article_html)
             print(f"   Found {len(images)} images")
             
+            # Process images in parallel with Gemini if enabled
+            gemini_descriptions = {}
             if self.use_gemini and images:
-                print(f"🤖 Will generate AI descriptions using Gemini Vision API...")
+                start_time = time.time()
+                gemini_descriptions = asyncio.run(self._process_images_parallel(images))
+                elapsed = time.time() - start_time
+                successful = sum(1 for desc in gemini_descriptions.values() if desc is not None)
+                print(f"   ✓ Processed {successful}/{len(images)} images in {elapsed:.1f}s")
             
             print("🔄 Converting to Markdown...")
-            markdown_content = self.html_to_markdown(article_html, images)
+            markdown_content = self.html_to_markdown(article_html, images, gemini_descriptions)
             
             print("💾 Creating Markdown file...")
             output_path = self.create_markdown_file(url, metadata, markdown_content, images)
@@ -533,12 +652,14 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
             print(f"   Words: {len(markdown_content.split())}")
             print(f"   Images processed: {len(images)}")
             if self.use_gemini:
-                print(f"   AI descriptions: {len(images)}")
+                successful = sum(1 for desc in gemini_descriptions.values() if desc is not None)
+                print(f"   AI descriptions: {successful}/{len(images)}")
             
             return output_path
             
         except Exception as e:
             print(f"❌ Error processing {url}: {str(e)}")
+            self.logger.error(f"Error processing {url}: {str(e)}", exc_info=True)
             return None
 
 
@@ -570,9 +691,10 @@ Note: Gemini Vision API requires GEMINI_API_KEY in environment or .env file
     
     parser.add_argument('urls', nargs='*', help='Article URLs to process')
     parser.add_argument('-f', '--file', help='File containing URLs (one per line)')
-    parser.add_argument('-o', '--output', default='.', help='Output directory (default: current directory)')
+    parser.add_argument('-o', '--output', default='results', help='Output directory (default: ./results)')
     parser.add_argument('--gemini', action='store_true', help='Use Gemini Vision API for image descriptions (requires API key)')
     parser.add_argument('--api-key', help='Gemini API key (or set GEMINI_API_KEY environment variable)')
+    parser.add_argument('--force-renew', action='store_true', help='Force re-learning of site extraction rules (ignores existing config)')
     
     args = parser.parse_args()
     
@@ -603,7 +725,8 @@ Note: Gemini Vision API requires GEMINI_API_KEY in environment or .env file
     extractor = ArticleExtractor(
         output_dir=args.output,
         use_gemini=args.gemini,
-        gemini_api_key=args.api_key
+        gemini_api_key=args.api_key,
+        force_renew=args.force_renew
     )
     
     print(f"\n🚀 Processing {len(urls)} article(s)...")
