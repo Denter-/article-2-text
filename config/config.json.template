@@ -1,0 +1,6 @@
+{
+  "GEMINI_API_KEY": "your_api_key_here",
+  "_instructions": "Rename this file to config.json and add your actual API key",
+  "_get_key_from": "https://makersuite.google.com/app/apikey"
+}
+

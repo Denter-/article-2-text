@@ -1,0 +1,22 @@
+# ForEntrepreneurs.com Popular Articles
+# Add URLs here, one per line. Lines starting with # are ignored.
+
+# SaaS Metrics Series
+https://www.forentrepreneurs.com/saas-metrics-2/
+https://www.forentrepreneurs.com/saas-metrics-2-definitions/
+
+# Customer Acquisition & Growth
+https://www.forentrepreneurs.com/startup-killer/
+https://www.forentrepreneurs.com/sales-complexity/
+https://www.forentrepreneurs.com/why-churn-is-critical-in-saas/
+
+# Pricing & Revenue
+https://www.forentrepreneurs.com/multi-axis-pricing-a-key-tool-for-increasing-saas-revenue/
+https://www.forentrepreneurs.com/ltv/
+
+# Business Strategy
+https://www.forentrepreneurs.com/road-to-recurring-revenue-models/
+https://www.forentrepreneurs.com/product-market-fit/
+
+# Add more URLs here as needed...
+

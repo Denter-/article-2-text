@@ -1,0 +1,37 @@
+# Site extraction configuration template
+# This file shows the structure for site configs
+
+domain: example.com
+
+# When this config was created/updated
+learned_at: "2025-10-02T14:30:00Z"
+
+extraction:
+  # Main article content
+  article_content:
+    selector: "article"          # CSS selector (preferred)
+    fallback: "main"              # Fallback if primary fails
+  
+  # Metadata extraction
+  title:
+    og_meta: "og:title"           # OpenGraph meta tag
+    fallback_selector: "h1"       # CSS selector fallback
+  
+  author:
+    json_ld: "author.name"        # JSON-LD path
+    fallback_selector: ".author"  # CSS selector fallback
+  
+  date_published:
+    json_ld: "datePublished"
+    fallback_meta: "article:published_time"
+
+# Optional: Pattern-based extraction (for complex cases)
+# content_pattern:
+#   start_marker: "<div[^>]*class=\"content\"[^>]*>"
+#   end_marker: "(?=<footer|<div[^>]*id=\"comments\")"
+
+# Human-readable notes about this site
+notes: |
+  Additional information about site structure,
+  known issues, or special considerations.
+
