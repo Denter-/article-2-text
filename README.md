@@ -27,7 +27,7 @@ Extract business articles (optimized for ForEntrepreneurs.com) and convert all c
 ```bash
 # 1. Clone and setup
 git clone <repository-url>
-cd business_articles
+cd article-2-text
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -135,7 +135,7 @@ before recovery...
 ## 🏗️ Project Structure
 
 ```
-business_articles/
+article-2-text/
 ├── README.md                  # This file
 ├── requirements.txt           # Python dependencies
 ├── .env.example              # Environment variables template

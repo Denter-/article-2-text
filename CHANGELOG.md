@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Project Structure
 ```
-business_articles/
+article-2-text/
 ├── src/              # Source code
 ├── tests/            # Test scripts
 ├── scripts/          # Utility scripts
