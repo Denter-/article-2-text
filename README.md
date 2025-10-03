@@ -12,36 +12,13 @@ Extract business articles (optimized for ForEntrepreneurs.com) and convert all c
 ## ✨ Features
 
 - 🧠 **Self-Learning Site Registry** - AI automatically learns extraction rules for any website
-- 🌐 **Dynamic Content Detection** - Automatically detects and renders JavaScript-heavy sites with headless browser
-- 🔄 **Iterative Filter Refinement** - AI compares before/after HTML to progressively improve extraction (up to 6 iterations)
 - 🤖 **AI-Powered Image Descriptions** - Uses Google Gemini Vision API for detailed, context-aware descriptions
 - 📊 **Chart Recognition** - Accurately describes charts, graphs, tables, formulas, and diagrams
 - 🚫 **Smart Filtering** - Automatically skips UI elements (buttons, logos, navigation)
 - 📝 **Clean Markdown Output** - Professional formatting with proper structure
-- ⚡ **Parallel Processing** - Process all images simultaneously (4-8x faster)
-- 🔄 **Auto-Retry Logic** - Up to 3 attempts per image with exponential backoff
-- 📦 **Batch Processing** - Process multiple articles from a URL list
+- ⚡ **Batch Processing** - Process multiple articles from a URL list
 - 💰 **Cost-Effective** - Learn once per site (~$0.05), then extract forever (free)
 - ♿ **Accessibility First** - Descriptions optimized for text-to-speech consumption
-
----
-
-## 🆕 What's New (Latest Update)
-
-### Version 3.0 - Dynamic Content & Smart Filtering
-- 🌐 **Headless Browser Support** - Automatically detects and renders JavaScript-heavy sites (HBR, NYT, etc.)
-- 🔄 **Iterative Filter Refinement** - AI compares before/after HTML to progressively remove UI noise (up to 6 iterations)
-- 🎯 **99% accuracy** - Comparative validation ensures clean content extraction
-- 📊 **Smart Detection** - First tries fast `curl`, only uses browser when needed
-- 🧠 **Self-Learning** - Remembers which sites need browser rendering for future extractions
-
-### Version 2.0 - Parallel Processing & Performance
-- ⚡ **4-8x faster image processing** - All images processed simultaneously
-- 🔄 **Smart retry logic** - Automatic retries with exponential backoff (up to 3 attempts)
-- 📁 **Default output directory** - Now saves to `./results` by default
-- 🎯 **100% success rate** - Robust error handling ensures no failed images
-
-**Example:** Extract HBR article with JavaScript rendering + 6-iteration filter refinement = clean, accurate content
 
 ---
 
@@ -55,18 +32,15 @@ python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# 2. Install Playwright browsers (required for JavaScript-rendered sites)
-playwright install chromium
-
-# 3. Configure API key
+# 2. Configure API key
 cp config/config.json.example config/config.json
 # Edit config/config.json and add your Gemini API key
 
-# 4. Extract an article (outputs to results/ by default)
+# 3. Extract an article
 python3 -m src.article_extractor --gemini https://www.forentrepreneurs.com/saas-metrics-2/
 
-# 5. Find your result
-ls results/  # Outputs saved here automatically
+# 4. Find your result
+ls results/
 ```
 
 **Get your free Gemini API key:** https://makersuite.google.com/app/apikey
@@ -122,12 +96,8 @@ python3 -m src.article_extractor --gemini -f config/urls.txt
 ### Custom Output Directory
 
 ```bash
-# Default: saves to ./results
-python3 -m src.article_extractor --gemini https://example.com/article
-
-# Custom: save to a different folder
 python3 -m src.article_extractor --gemini \
-  --output my_articles \
+  --output results/my_articles \
   https://example.com/article
 ```
 
@@ -244,22 +214,17 @@ cp .env.example .env
 
 ---
 
-## 💰 Cost & Performance
+## 💰 Cost Estimate
 
-Using Google Gemini 2.5 Flash with parallel processing:
+Using Google Gemini 2.5 Flash:
 
-| Volume | Images | Cost | Time | Features |
-|--------|--------|------|------|----------|
-| 1 article | ~13 | $0.13-0.26 | 8-15 sec | Parallel + retry |
-| 1 article | ~24 | $0.24-0.48 | 10-20 sec | Parallel + retry |
-| 10 articles | ~240 | $2.40-4.80 | 3-6 min | Batch mode |
-| 100 articles | ~2,400 | $24-48 | 30-60 min | Batch mode |
+| Volume | Images | Cost | Time |
+|--------|--------|------|------|
+| 1 article | ~24 | $0.25-0.50 | 60 sec |
+| 10 articles | ~240 | $2.50-5.00 | 10 min |
+| 100 articles | ~2,400 | $25-50 | 2 hours |
 
-**Performance Improvements:**
-- ⚡ **4-8x faster** than sequential processing
-- 🔄 **Auto-retry** up to 3 times with exponential backoff
-- 📊 **Parallel processing** all images simultaneously (0.1s stagger)
-- 💰 **Much cheaper** than GPT-4 Vision (~$0.05-0.10 per image)
+**Much cheaper than GPT-4 Vision (~$0.05-0.10 per image)**
 
 ---
 
@@ -310,34 +275,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🗺️ Roadmap
 
-**Recent Additions:**
-- [x] Async parallel image processing (4-8x faster)
-- [x] Automatic retry logic with exponential backoff
-- [x] Default output to results directory
-
-**Coming Soon:**
 - [ ] Support for more websites
 - [ ] Image download option
 - [ ] PDF export
 - [ ] Multi-language support
 - [ ] Web interface
 - [ ] Docker containerization
-
-## 🔧 Technical Details
-
-### Async Processing Architecture
-The extractor uses Python's `asyncio` for concurrent API requests:
-- **Staggered launches**: 0.1s delay between request starts (rate limit friendly)
-- **Parallel execution**: All images processed simultaneously
-- **Smart retries**: Exponential backoff (1s, 2s, 4s) for failed requests
-- **Error isolation**: Failed images don't block successful ones
-- **Progress tracking**: Real-time success rate and timing metrics
-
-```python
-# Example output
-🤖 Processing 13 images in parallel with Gemini Vision API...
-   ✓ Processed 13/13 images in 41.9s
-```
 
 ---
 

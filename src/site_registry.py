@@ -318,6 +318,22 @@ Only JSON, no other text."""
                 # Add requires_browser flag if detected
                 if requires_browser:
                     config['requires_browser'] = True
+            else:
+                # Subsequent iterations: ask for better config based on feedback
+                if iteration == 1:
+                    # First retry - use the validation feedback
+                    issue = f"Previous extraction failed or had quality issues. Please provide a completely new config with better selectors."
+                else:
+                    # Later retries - use specific feedback
+                    issue = f"Previous config still not working properly. Need better selectors and exclusions."
+                
+                print(f"   🔄 Asking AI for improved config...")
+                new_config = self._ask_gemini_for_better_config(html_content, domain, config, issue)
+                if new_config and new_config != config:
+                    config = new_config
+                    print(f"   ✓ Received improved config from AI")
+                else:
+                    print(f"   ⚠️  AI returned same config, trying manual adjustments...")
             
             # Extract content using learned rules (HTML, not converted to MD yet)
             extracted_html = self.extract_with_config(html_content, config)
@@ -397,8 +413,93 @@ Only JSON, no other text."""
                     else:
                         print("   ⚠️  Validation did not return filter suggestions")
         
-        # Failed after max iterations
+        # Failed after max iterations - try fallback approach
+        print(f"\n   🔄 All AI attempts failed, trying fallback approach...")
+        
+        # Create a simple fallback config based on common patterns
+        fallback_config = self._create_fallback_config(html_content, domain)
+        if fallback_config:
+            print(f"   ✓ Created fallback config")
+            # Test the fallback config
+            extracted_html = self.extract_with_config(html_content, fallback_config)
+            if extracted_html:
+                print(f"   ✅ Fallback config works!")
+                if requires_browser:
+                    fallback_config['requires_browser'] = True
+                self.save_config(domain, fallback_config)
+                return True, fallback_config, None
+            else:
+                print(f"   ❌ Fallback config also failed")
+        
         return False, None, f"Failed to learn valid rules after {max_iterations} attempts"
+    
+    def _create_fallback_config(self, html_content, domain):
+        """Create a simple fallback config when AI learning fails"""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Try to find the main content container using common patterns
+        selectors_to_try = [
+            "div[class*='elementor'][class*='post']",
+            "div[class*='post']",
+            "div[class*='article']",
+            "div[class*='content']",
+            "div[class*='entry']",
+            "div[class*='hentry']",
+            "article",
+            "main",
+            "div[class*='wp-content']",
+            "div[class*='entry-content']"
+        ]
+        
+        for selector in selectors_to_try:
+            element = soup.select_one(selector)
+            if element:
+                # Check if it has substantial text content
+                text_content = element.get_text().strip()
+                if len(text_content) > 500:  # Has substantial content
+                    print(f"   📍 Found content with selector: {selector}")
+                    print(f"   📊 Content length: {len(text_content)} chars")
+                    
+                    # Create a simple config
+                    config = {
+                        'domain': domain,
+                        'extraction': {
+                            'article_content': {
+                                'selector': selector,
+                                'fallback': 'body',
+                                'exclude_selectors': [
+                                    'nav', 'header', 'footer',
+                                    '[class*="share"]', '[class*="social"]',
+                                    '[class*="recommended"]', '[class*="related"]',
+                                    '[class*="ad"]', '[class*="promo"]',
+                                    '.elementor-section[class*="header"]',
+                                    '.elementor-section[class*="footer"]',
+                                    '.elementor-section[class*="sidebar"]',
+                                    '.elementor-section[class*="navigation"]'
+                                ],
+                                'cleanup_rules': {
+                                    'stop_at_repeated_links': True,
+                                    'max_consecutive_links': 3
+                                }
+                            },
+                            'title': {
+                                'og_meta': 'og:title',
+                                'fallback_selector': 'h1'
+                            },
+                            'author': {
+                                'json_ld': 'author.name',
+                                'fallback_selector': '.author, [itemprop="author"]'
+                            },
+                            'date_published': {
+                                'json_ld': 'datePublished',
+                                'fallback_selector': 'time[datetime], .date, .published-date'
+                            }
+                        },
+                        'notes': f'Fallback config created using selector: {selector}'
+                    }
+                    return config
+        
+        return None
     
     def _ask_gemini_for_config(self, html_content, domain):
         """Ask Gemini to suggest extraction rules"""
@@ -425,7 +526,14 @@ CRITICAL REQUIREMENTS:
    - Newsletter signup forms, CTAs at the end
 
 EXTRACTION STRATEGY:
-- Provide CSS selectors that BeautifulSoup can use
+- FIRST: Look at the actual HTML structure - don't assume semantic HTML like <article> or <main>
+- Look for the largest text container that contains the main article content
+- Common patterns for article content:
+  * div with classes containing "post", "article", "content", "entry", "hentry"
+  * div with classes containing "elementor" and "post" (Elementor page builder)
+  * div with classes containing "wp-content" or "entry-content" (WordPress)
+  * div with classes containing "post-body" or "article-body"
+  * Any container that wraps the main text content
 - Use `exclude_selectors` to AGGRESSIVELY remove unwanted sections
 - Be VERY liberal with exclusions - it's better to exclude too much than to include UI chrome
 - Common patterns to exclude:
@@ -434,6 +542,7 @@ EXTRACTION STRATEGY:
   * [class*="recommended"], [class*="related"]
   * [class*="ad"], [class*="promo"]
   * [aria-label*="Share"], [aria-label*="Post"]
+  * [class*="elementor-section"] for navigation/header/footer sections
 - Include `cleanup_rules` to stop before related articles
 - Include fallback options
 - Be specific enough to avoid extracting non-content
@@ -489,10 +598,18 @@ RESPOND ONLY WITH THE YAML CONFIG, NO OTHER TEXT."""
 
         user_prompt = f"""Analyze this HTML from {domain} and provide extraction rules.
 
+IMPORTANT: Look at the actual HTML structure first. Don't assume semantic HTML elements like <article> or <main> exist.
+
 HTML (first 15000 chars):
 ```html
 {html_sample}
 ```
+
+ANALYSIS STEPS:
+1. Find the main content container - look for divs with classes like "post", "article", "content", "entry", "hentry", "elementor"
+2. Identify what contains the actual article text (not navigation, ads, or related content)
+3. Create a selector that targets this main content container
+4. Add aggressive exclusions for navigation, social sharing, related articles, etc.
 
 Provide the YAML configuration:"""
 
@@ -514,10 +631,14 @@ Provide the YAML configuration:"""
                 yaml_text = response_text
             
             # Parse YAML
-            config = yaml.safe_load(yaml_text)
-            
-            print(f"   ✓ Received extraction config from AI")
-            return config
+            try:
+                config = yaml.safe_load(yaml_text)
+                print(f"   ✓ Received extraction config from AI")
+                return config
+            except yaml.YAMLError as e:
+                print(f"   ❌ YAML parsing error: {e}")
+                print(f"   Raw YAML: {yaml_text[:500]}...")
+                return None
             
         except Exception as e:
             print(f"   ❌ Error getting config from Gemini: {e}")
@@ -529,9 +650,18 @@ Provide the YAML configuration:"""
         
         system_prompt = """You are an expert at fixing extraction rules.
 
-Analyze the HTML and the previous config, then provide IMPROVED extraction rules with AGGRESSIVE exclusions.
+Analyze the HTML and the previous config, then provide IMPROVED extraction rules.
 
-CRITICAL PATTERNS TO EXCLUDE (real examples from major sites):
+CRITICAL: Look at the ACTUAL HTML structure first. Don't assume semantic HTML elements exist.
+
+COMMON CONTENT CONTAINERS (look for these patterns):
+- div with classes containing "post", "article", "content", "entry", "hentry"
+- div with classes containing "elementor" and "post" (Elementor page builder)
+- div with classes containing "wp-content" or "entry-content" (WordPress)
+- div with classes containing "post-body" or "article-body"
+- Any container that wraps the main text content
+
+CRITICAL PATTERNS TO EXCLUDE:
 
 1. **Navigation & UI Chrome:**
    - nav, header, footer
@@ -562,19 +692,21 @@ CRITICAL PATTERNS TO EXCLUDE (real examples from major sites):
    - CTAs at the end
    - Author bios AFTER article conclusion
 
-STRATEGY:
-- Be VERY aggressive with exclusions - better to exclude too much than include UI
-- Use CSS attribute selectors with wildcards INSIDE brackets: [class*='pattern']
-  CORRECT: [class*='Header'], [class*='Menu'], [aria-label*='Share']
-  WRONG: .Header-*, button-*  (wildcards don't work as suffixes in CSS)
-- Use exact class names for specific patterns: .Header-module_header__qxHtx
-- Target both specific classes AND generic patterns
-- Look for patterns in the HTML that repeat across multiple unwanted sections
+6. **Elementor-specific exclusions:**
+   - .elementor-section[class*='header']
+   - .elementor-section[class*='footer']
+   - .elementor-section[class*='sidebar']
+   - .elementor-section[class*='navigation']
+   - .elementor-section[class*='breadcrumb']
+   - .elementor-section[class*='related']
+   - .elementor-section[class*='recommended']
 
-If extraction is incomplete:
-- Try more specific selector for main content container
-- Check if content is in nested divs or semantic tags
-- Consider content_pattern approach
+STRATEGY:
+- FIRST: Find the main content container by looking at the HTML structure
+- Use CSS attribute selectors with wildcards INSIDE brackets: [class*='pattern']
+- Be VERY aggressive with exclusions - better to exclude too much than include UI
+- Look for patterns in the HTML that repeat across multiple unwanted sections
+- If the main selector doesn't work, try more specific selectors or content_pattern approach
 
 Return ONLY the corrected YAML config, no other text."""
 
@@ -608,8 +740,13 @@ Provide IMPROVED YAML configuration with MORE AGGRESSIVE exclude_selectors:"""
             else:
                 yaml_text = response_text
             
-            config = yaml.safe_load(yaml_text)
-            return config
+            try:
+                config = yaml.safe_load(yaml_text)
+                return config
+            except yaml.YAMLError as e:
+                print(f"   ❌ YAML parsing error in improved config: {e}")
+                print(f"   Raw YAML: {yaml_text[:500]}...")
+                return old_config  # Return old config as fallback
             
         except Exception as e:
             print(f"   ❌ Error getting improved config: {e}")

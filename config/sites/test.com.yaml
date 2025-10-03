@@ -1,0 +1,58 @@
+domain: test.com
+extraction:
+  article_content:
+    selector: article
+    fallback: body
+    exclude_selectors:
+    - nav
+    - header
+    - footer
+    - .w-dyn-list
+    - .w-dyn-items
+    - '[class*=''collection-list'']'
+    - '[class*=''share'']'
+    - '[class*=''social'']'
+    - '[class*=''recommended'']'
+    - '[class*=''related'']'
+    - '[class*=''promo'']'
+    - '[class*=''ad'']'
+    - '[aria-label*=''Share'']'
+    - '[aria-label*=''Post'']'
+    - '[role=''complementary'']'
+    - '[id*=''ad'']'
+    - '[id*=''promo'']'
+    - '[class*=''author-bio'']:last-of-type'
+    - '[class*=''newsletter'']'
+    - '[class*=''cta'']'
+    - '[class*=''subscribe'']'
+    - '[class*=''read-more-card'']'
+    - '[class*=''you-might-also-like'']'
+    - '[class*=''recommendation'']'
+    - '[class*=''related-post'']'
+    - '[class*=''related-article'']'
+    - '[class*=''post-card'']'
+    - '[class*=''article-card'']'
+    - '[class*=''partner-center'']'
+    - '[class*=''webflow-list'']'
+    - '[class*=''dynamic-list'']'
+    cleanup_rules:
+      stop_at_repeated_links: true
+      max_consecutive_links: 3
+  title:
+    og_meta: og:title
+    fallback_selector: h1
+  author:
+    json_ld: author.name
+    fallback_selector: .author, [itemprop='author']
+  date_published:
+    json_ld: datePublished
+    fallback_selector: time[datetime], .date, .published-date
+notes: 'The provided HTML is extremely minimal, consisting of just a basic article
+  structure with an H1 and a paragraph.
+
+  The primary selector targets the <article> tag directly.
+
+  A comprehensive list of common exclusion selectors has been included to handle more
+  complex site structures, even though they are not present in this specific, simple
+  HTML.'
+learned_at: '2025-10-03T16:16:41.780947'
