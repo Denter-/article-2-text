@@ -1,33 +1,18 @@
 domain: forentrepreneurs.com
 extraction:
   article_content:
-    selector: div[class*='elementor'][class*='post']
-    fallback: body
+    selector: body
     exclude_selectors:
-    - nav
-    - header
-    - footer
-    - '[class*="share"]'
-    - '[class*="social"]'
-    - '[class*="recommended"]'
-    - '[class*="related"]'
-    - '[class*="ad"]'
-    - '[class*="promo"]'
-    - .elementor-section[class*="header"]
-    - .elementor-section[class*="footer"]
-    - .elementor-section[class*="sidebar"]
-    - .elementor-section[class*="navigation"]
-    cleanup_rules:
-      stop_at_repeated_links: true
-      max_consecutive_links: 3
-  title:
-    og_meta: og:title
-    fallback_selector: h1
-  author:
-    json_ld: author.name
-    fallback_selector: .author, [itemprop="author"]
-  date_published:
-    json_ld: datePublished
-    fallback_selector: time[datetime], .date, .published-date
-notes: 'Fallback config created using selector: div[class*=''elementor''][class*=''post'']'
-learned_at: '2025-10-03T16:33:10.028902'
+    - .top-search-results
+    - '[data-id=''18aacc1'']'
+    - '[data-id=''61df0781'']'
+    - .elementor-widget-breadcrumbs
+    - section.elementor-element-b5297af
+    - '[data-widget_type=''jet-listing-grid.default'']'
+    - div.stay-updated
+    - '[data-widget_type=''post-comments.theme_comments'']'
+    - '[data-id=''dc6219b'']'
+    - div.copyright
+    - .skip-link
+notes: 'Inverted learning approach. Validation: ok'
+learned_at: '2025-10-05T16:34:05.053417'

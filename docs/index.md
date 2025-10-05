@@ -48,6 +48,14 @@ Complete documentation for the Article Extractor with AI Image Descriptions.
 
 **Deep dive into how it works:**
 
+- **[System Architecture](technical/architecture.md)** ⭐ **NEW**
+  - Complete system overview
+  - Module descriptions
+  - Learning process flow diagram
+  - Inverted learning approach
+  - Template structure
+  - AI integration details
+
 - **[Site Registry (Self-Learning)](technical/site-registry.md)**
   - Automatic learning with AI
   - Iterative filter refinement
@@ -75,6 +83,7 @@ Complete documentation for the Article Extractor with AI Image Descriptions.
 
 - **Extract my first article** → [Quick Start](getting-started/quickstart.md)
 - **Set up AI descriptions** → [Gemini API Setup](getting-started/setup-gemini.md)
+- **Understand how it works** → [System Architecture](technical/architecture.md) ⭐
 - **Install browser support** → [Installation Guide](getting-started/installation.md)
 - **Process many articles** → [Batch Processing](usage/batch-processing.md)
 - **Understand self-learning** → [Site Registry](technical/site-registry.md)
@@ -90,11 +99,11 @@ Complete documentation for the Article Extractor with AI Image Descriptions.
 |---------|-------|--------|
 | Getting Started | 3 | ✅ Complete |
 | Usage Guides | 2 | ✅ Complete |
-| Technical Docs | 3 | ✅ Complete |
+| Technical Docs | 4 | ✅ Complete |
 
-**Total: 9 documentation files** (clean and focused)
+**Total: 10 documentation files** (clean and focused)
 
-**Latest Update:** Added Dynamic Content Detection guide (browser rendering, smart detection)
+**Latest Update:** Added System Architecture with complete flow diagram and inverted learning explanation
 
 ---
 

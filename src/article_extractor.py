@@ -23,19 +23,27 @@ import subprocess
 # Import site registry for self-learning
 try:
     from .site_registry import SiteRegistry
+    from .extraction_engine import ExtractionEngine
 except ImportError:
     # Fallback for direct execution
     import site_registry
+    import extraction_engine
     SiteRegistry = site_registry.SiteRegistry
+    ExtractionEngine = extraction_engine.ExtractionEngine
 
 # Suppress gRPC/ALTS warnings from Google APIs
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['GLOG_minloglevel'] = '2'
 
+# Suppress Pydantic warnings about field shadowing
+import warnings
+warnings.filterwarnings('ignore', message='Field name .* shadows an attribute')
+
 # Optional Gemini support
 GEMINI_AVAILABLE = False
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai.types import GenerateContentConfig, ThinkingConfig
     from PIL import Image
     from dotenv import load_dotenv
     load_dotenv()
@@ -49,7 +57,7 @@ class ArticleExtractor:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.use_gemini = use_gemini and GEMINI_AVAILABLE
-        self.gemini_model = None
+        self.gemini_client = None
         self.force_renew = force_renew
         
         # Setup logging
@@ -57,6 +65,7 @@ class ArticleExtractor:
         
         # Initialize site registry for self-learning
         self.site_registry = SiteRegistry(use_gemini=use_gemini) if use_gemini else None
+        self.extraction_engine = ExtractionEngine()
         
         if self.use_gemini:
             if not gemini_api_key:
@@ -67,15 +76,14 @@ class ArticleExtractor:
                 self.use_gemini = False
             else:
                 try:
-                    genai.configure(api_key=gemini_api_key)
-                    self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-                    print("✓ Gemini Vision API enabled")
+                    self.gemini_client = genai.Client(api_key=gemini_api_key)
+                    print("✓ Gemini Vision API enabled (2.5 Flash - thinking disabled)")
                 except Exception as e:
                     print(f"⚠️  Warning: Failed to initialize Gemini: {e}")
                     print("   Falling back to context-based descriptions")
                     self.use_gemini = False
     
-    def setup_logging(self, log_file=None):
+    def setup_logging(self, log_file=None, verbose=False):
         """Setup logging to file and console"""
         # Create logs directory
         log_dir = Path('logs')
@@ -90,7 +98,7 @@ class ArticleExtractor:
         
         # Configure logging
         self.logger = logging.getLogger('ArticleExtractor')
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG if verbose else logging.INFO)
         
         # Clear any existing handlers
         self.logger.handlers.clear()
@@ -101,16 +109,16 @@ class ArticleExtractor:
         file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(file_formatter)
         
-        # Console handler (only warnings and errors)
+        # Console handler
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.WARNING)
+        console_handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
         console_formatter = logging.Formatter('%(levelname)s: %(message)s')
         console_handler.setFormatter(console_formatter)
         
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
         
-        self.logger.info(f"Logging initialized: {log_file}")
+        self.logger.info(f"Logging initialized: {log_file} | verbose={verbose}")
         
     def download_article(self, url):
         """Download article HTML using curl"""
@@ -139,7 +147,7 @@ class ArticleExtractor:
     
     def generate_gemini_description(self, image_url, context_before, context_after):
         """Generate image description using Gemini Vision API (synchronous wrapper)"""
-        if not self.use_gemini or not self.gemini_model:
+        if not self.use_gemini or not self.gemini_client:
             return None
         
         # This is now just a wrapper for the async version
@@ -148,7 +156,7 @@ class ArticleExtractor:
     
     async def _generate_gemini_description_async(self, image_url, context_before, context_after, max_retries=3):
         """Generate image description using Gemini Vision API (async with retry logic)"""
-        if not self.use_gemini or not self.gemini_model:
+        if not self.use_gemini or not self.gemini_client:
             return None
         
         # Download image to temp location
@@ -225,12 +233,25 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
 
                 full_prompt = system_context + "\n\n" + user_prompt
                 
-                # Generate description (run in executor to avoid blocking)
+                # Generate description using new SDK (run in executor to avoid blocking)
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self.gemini_model.generate_content([full_prompt, img])
-                )
+                
+                def call_gemini():
+                    config = GenerateContentConfig(
+                        temperature=0.1,
+                        top_p=0.95,
+                        top_k=40,
+                        max_output_tokens=8192,
+                        thinking_config=ThinkingConfig(thinking_budget=0)
+                    )
+                    # New SDK requires image to be part of contents list
+                    return self.gemini_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=[full_prompt, img],
+                        config=config
+                    )
+                
+                response = await loop.run_in_executor(None, call_gemini)
                 description = response.text.strip()
                 
                 # Clean up
@@ -333,8 +354,16 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
         if self.site_registry and url:
             domain = self.site_registry.get_domain_from_url(url)
             
-            # Load existing config or learn new one
-            config = self.site_registry.load_config(domain)
+            # If force_renew, delete existing config to trigger re-learning
+            if self.force_renew:
+                config_path = self.site_registry.get_config_path(domain)
+                if config_path.exists():
+                    config_path.unlink()
+                    self.logger.info(f"🗑️  Deleted existing config for {domain} (force-renew)")
+                config = None
+            else:
+                # Load existing config or learn new one
+                config = self.site_registry.load_config(domain)
             
             if not config and self.use_gemini:
                 # Learn from this site
@@ -347,33 +376,12 @@ IMPORTANT: Write in the same language as the article text above. Do NOT include 
             
             # Try extraction with config
             if config:
-                content = self.site_registry.extract_with_config(html_content, config)
+                content = self.extraction_engine.extract_article_html(html_content, config)
                 if content:
                     return content
         
-        # Fallback strategies (for when registry not available or failed)
-        self.logger.info("Using fallback extraction strategies")
-        
-        # Strategy 1: Elementor widget content (common on ForEntrepreneurs)
-        match = re.search(
-            r'<h[12][^>]*>.*?(<h[12][^>]*>.*?</h[12]>.*?)(?=<footer|<div[^>]*class="[^"]*comments|<div[^>]*id="comments)',
-            html_content,
-            re.DOTALL | re.IGNORECASE
-        )
-        if match:
-            return match.group(1)
-        
-        # Strategy 2: Article tag
-        match = re.search(r'<article[^>]*>(.*?)</article>', html_content, re.DOTALL)
-        if match:
-            return match.group(1)
-        
-        # Strategy 3: Main tag
-        match = re.search(r'<main[^>]*>(.*?)</main>', html_content, re.DOTALL)
-        if match:
-            return match.group(1)
-        
-        raise Exception("Could not find article content")
+        # No fallback - if learning failed, we should know about it
+        raise Exception(f"Could not extract article content. Site template learning failed or no config available for {url}")
     
     def extract_images(self, content):
         """Extract all images with their context"""
@@ -695,6 +703,7 @@ Note: Gemini Vision API requires GEMINI_API_KEY in environment or .env file
     parser.add_argument('--gemini', action='store_true', help='Use Gemini Vision API for image descriptions (requires API key)')
     parser.add_argument('--api-key', help='Gemini API key (or set GEMINI_API_KEY environment variable)')
     parser.add_argument('--force-renew', action='store_true', help='Force re-learning of site extraction rules (ignores existing config)')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose console logging (debug level)')
     
     args = parser.parse_args()
     
@@ -728,6 +737,8 @@ Note: Gemini Vision API requires GEMINI_API_KEY in environment or .env file
         gemini_api_key=args.api_key,
         force_renew=args.force_renew
     )
+    # Reconfigure logging with verbosity
+    extractor.setup_logging(verbose=args.verbose)
     
     print(f"\n🚀 Processing {len(urls)} article(s)...")
     if args.gemini:
