@@ -6,16 +6,19 @@
 
 ## Overview
 
-The Site Registry is a self-learning system that uses Google Gemini to analyze websites and create extraction rules automatically. Once learned, these rules are saved and reused for all future articles from that domain.
+The Site Registry is a self-learning system that uses Google Gemini with an **inverted learning approach** to analyze websites and create extraction rules automatically. Once learned, these rules are saved and reused for all future articles from that domain.
 
 ### Key Benefits
 
-- 🤖 **Automatic Learning** - AI analyzes HTML and creates extraction rules
+- 🤖 **Inverted Learning** - Instead of finding what IS an article, we identify what ISN'T (noise) and exclude it
+- 🎯 **Boundary Detection** - Finds article start/end markers for precise extraction
 - 🌐 **Dynamic Content Detection** - Automatically detects and renders JavaScript-heavy sites
-- 🔄 **Iterative Refinement** - Compares before/after HTML to refine filters (up to 6 iterations)
+- 🔄 **Iterative Refinement** - Two-phase approach: boundaries (3 iterations) + noise (3 iterations)
 - 💰 **Cost Efficient** - Learn once ($0.01-0.05), extract forever (free)
-- ✅ **Self-Validating** - AI validates extraction quality through comparative analysis
+- ✅ **Self-Validating** - AI validates extraction quality at each step
 - 🔧 **Force Renew** - Re-learn when sites change structure
+
+> **New:** See [System Architecture](architecture.md) for complete technical details and flow diagrams.
 
 ---
 

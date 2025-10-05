@@ -1,37 +1,18 @@
-# ForEntrepreneurs.com extraction configuration
-# Auto-generated: 2025-10-02
-# Last validated: 2025-10-02
-
 domain: forentrepreneurs.com
-
 extraction:
-  # Primary method: CSS selector
   article_content:
-    selector: "article"
-    fallback: "main"
-  
-  # Metadata extraction
-  title:
-    og_meta: "og:title"
-    fallback_selector: "h1.entry-title"
-  
-  author:
-    json_ld: "author.name"
-    fallback_selector: "span.author-name"
-  
-  date_published:
-    json_ld: "datePublished"
-    fallback_meta: "article:published_time"
-  
-  # Content boundaries (alternative method using patterns)
-  content_pattern:
-    # Match from first h1/h2 to footer or comments section
-    start_marker: "<h[12][^>]*>"
-    end_marker: "(?=<footer|<div[^>]*class=\"[^\"]*comments)"
-
-notes: |
-  ForEntrepreneurs.com uses Elementor page builder.
-  Primary strategy: Extract <article> tag
-  Fallback: Extract content between first heading and footer
-  Images: All <img> tags within article content
-
+    selector: body
+    exclude_selectors:
+    - .top-search-results
+    - '[data-id=''18aacc1'']'
+    - '[data-id=''61df0781'']'
+    - .elementor-widget-breadcrumbs
+    - section.elementor-element-b5297af
+    - '[data-widget_type=''jet-listing-grid.default'']'
+    - div.stay-updated
+    - '[data-widget_type=''post-comments.theme_comments'']'
+    - '[data-id=''dc6219b'']'
+    - div.copyright
+    - .skip-link
+notes: 'Inverted learning approach. Validation: ok'
+learned_at: '2025-10-05T16:34:05.053417'

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Convenience script for batch processing ForEntrepreneurs.com articles
+# Convenience script for batch processing articles from any website
+# Uses AI-powered self-learning to extract clean article content
 
 set -e
 
@@ -9,7 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo "=================================================="
-echo "  ForEntrepreneurs Article Batch Extractor"
+echo "  AI-Powered Article Batch Extractor"
 echo "=================================================="
 echo ""
 
@@ -18,9 +19,9 @@ if [ ! -f "config/urls.txt" ]; then
     echo "❌ Error: config/urls.txt not found"
     echo "   Create this file with URLs (one per line)"
     echo ""
-    echo "   Example:"
-    echo "   https://www.forentrepreneurs.com/saas-metrics-2/"
-    echo "   https://www.forentrepreneurs.com/startup-killer/"
+    echo "   Example (any website):"
+    echo "   https://www.example.com/article-1"
+    echo "   https://www.another-site.com/blog/post"
     exit 1
 fi
 
