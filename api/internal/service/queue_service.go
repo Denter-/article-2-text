@@ -11,6 +11,10 @@ import (
 
 const (
 	TypeExtractionJob = "extraction:job"
+
+	// Queue names
+	QueueGoWorker     = "go-worker"     // For sites with existing configs
+	QueuePythonWorker = "python-worker" // For sites needing AI learning
 )
 
 type QueueService struct {
@@ -23,6 +27,11 @@ func NewQueueService(redisAddr string) *QueueService {
 }
 
 func (s *QueueService) EnqueueJob(ctx context.Context, job *models.Job) error {
+	// Default to go-worker queue for backward compatibility
+	return s.EnqueueJobToQueue(ctx, job, QueueGoWorker)
+}
+
+func (s *QueueService) EnqueueJobToQueue(ctx context.Context, job *models.Job, queueName string) error {
 	payload, err := json.Marshal(job)
 	if err != nil {
 		return fmt.Errorf("failed to marshal job: %w", err)
@@ -30,10 +39,10 @@ func (s *QueueService) EnqueueJob(ctx context.Context, job *models.Job) error {
 
 	task := asynq.NewTask(TypeExtractionJob, payload)
 
-	// Enqueue with options
-	_, err = s.client.EnqueueContext(ctx, task)
+	// Enqueue to specific queue with options
+	_, err = s.client.EnqueueContext(ctx, task, asynq.Queue(queueName))
 	if err != nil {
-		return fmt.Errorf("failed to enqueue task: %w", err)
+		return fmt.Errorf("failed to enqueue task to queue %s: %w", queueName, err)
 	}
 
 	return nil
@@ -42,5 +51,3 @@ func (s *QueueService) EnqueueJob(ctx context.Context, job *models.Job) error {
 func (s *QueueService) Close() error {
 	return s.client.Close()
 }
-
-

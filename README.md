@@ -47,6 +47,28 @@ ls results/
 
 ---
 
+## 🚀 Full System (API + Web Interface)
+
+For the complete system with API, workers, and web interface:
+
+```bash
+# Quick start (all services in foreground)
+./dev-start.sh
+
+# Or start with background services
+./start-system.sh start
+
+# Check status
+./start-system.sh status
+
+# Stop all services
+./stop-system.sh
+```
+
+**Access the web interface at:** http://localhost:5173
+
+---
+
 ## 📖 Documentation
 
 ### Getting Started

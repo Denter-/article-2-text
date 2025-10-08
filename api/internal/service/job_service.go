@@ -8,6 +8,7 @@ import (
 
 	"github.com/Denter-/article-extraction/api/internal/models"
 	"github.com/Denter-/article-extraction/api/internal/repository"
+	ws "github.com/Denter-/article-extraction/api/internal/websocket"
 	"github.com/google/uuid"
 )
 
@@ -16,6 +17,7 @@ type JobService struct {
 	configRepo *repository.ConfigRepository
 	userRepo   *repository.UserRepository
 	queueSvc   *QueueService
+	hub        *ws.Hub
 }
 
 func NewJobService(
@@ -23,12 +25,14 @@ func NewJobService(
 	configRepo *repository.ConfigRepository,
 	userRepo *repository.UserRepository,
 	queueSvc *QueueService,
+	hub *ws.Hub,
 ) *JobService {
 	return &JobService{
 		jobRepo:    jobRepo,
 		configRepo: configRepo,
 		userRepo:   userRepo,
 		queueSvc:   queueSvc,
+		hub:        hub,
 	}
 }
 
@@ -68,9 +72,28 @@ func (s *JobService) CreateJob(ctx context.Context, userID uuid.UUID, req *model
 		return nil, fmt.Errorf("failed to update credits: %w", err)
 	}
 
-	// Queue job for processing
-	if err := s.queueSvc.EnqueueJob(ctx, job); err != nil {
-		return nil, fmt.Errorf("failed to queue job: %w", err)
+	// Check if site configuration exists to determine which worker to use
+	_, err = s.configRepo.GetByDomain(ctx, job.Domain)
+	if err != nil {
+		// No config found, send to Python worker for AI learning
+		if err := s.queueSvc.EnqueueJobToQueue(ctx, job, "python-worker"); err != nil {
+			return nil, fmt.Errorf("failed to queue job for AI learning: %w", err)
+		}
+	} else {
+		// Config exists, send to Go worker for fast extraction
+		if err := s.queueSvc.EnqueueJobToQueue(ctx, job, "go-worker"); err != nil {
+			return nil, fmt.Errorf("failed to queue job for extraction: %w", err)
+		}
+	}
+
+	// Broadcast job creation via WebSocket
+	if s.hub != nil {
+		s.hub.BroadcastToUser(userID.String(), "job_status", map[string]interface{}{
+			"job_id":   job.ID.String(),
+			"status":   job.Status,
+			"url":      job.URL,
+			"domain":   job.Domain,
+		})
 	}
 
 	return job, nil
@@ -117,9 +140,16 @@ func (s *JobService) CreateBatchJobs(ctx context.Context, userID uuid.UUID, req 
 		return nil, fmt.Errorf("failed to update credits: %w", err)
 	}
 
-	// Queue all jobs
+	// Queue all jobs with appropriate routing
 	for _, job := range jobs {
-		s.queueSvc.EnqueueJob(ctx, job)
+		_, err := s.configRepo.GetByDomain(ctx, job.Domain)
+		if err != nil {
+			// No config found, send to Python worker for AI learning
+			s.queueSvc.EnqueueJobToQueue(ctx, job, "python-worker")
+		} else {
+			// Config exists, send to Go worker for fast extraction
+			s.queueSvc.EnqueueJobToQueue(ctx, job, "go-worker")
+		}
 	}
 
 	return jobs, nil
@@ -158,5 +188,3 @@ func extractDomain(urlStr string) (string, error) {
 
 	return host, nil
 }
-
-

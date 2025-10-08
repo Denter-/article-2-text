@@ -1,0 +1,8 @@
+domain: example.com
+extraction:
+  article_content:
+    selector: div > h1
+    exclude_selectors: []
+    truncate_after: body > div + *
+notes: 'Inverted learning approach. Boundaries: yes. Validation: ok'
+learned_at: '2025-10-07T08:02:33.201676'

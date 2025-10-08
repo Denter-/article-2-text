@@ -1,0 +1,38 @@
+# Renascence.io extraction configuration
+# Manually created with enhanced exclusion rules: 2025-10-02
+
+domain: renascence.io
+
+extraction:
+  article_content:
+    selector: ".text-rich-text"
+    fallback: ".w-richtext"
+    
+    # Exclude Webflow dynamic lists (related articles)
+    exclude_selectors:
+      - ".w-dyn-list"                          # Webflow dynamic lists
+      - ".w-dyn-items"                         # Webflow dynamic items
+      - ".w-dyn-item"                          # Individual dynamic items
+      - "[class*='collection-list']"          # Collection lists
+      - ".blog-post_featured-blog-list-header_list-wrapper"  # Related articles section
+      - "[fs-cmsfilter-element='list']"       # CMS filter lists
+    
+    # Cleanup rules to stop at repeated article links
+    cleanup_rules:
+      stop_at_repeated_links: true
+      max_consecutive_links: 3
+  
+  title:
+    og_meta: "og:title"
+    fallback_selector: "h1"
+  
+  author:
+    fallback_selector: ".author-name"
+  
+  date_published:
+    json_ld: "datePublished"
+
+notes: |
+  Renascence.io uses Webflow CMS with extensive dynamic content lists.
+  Main article is in .blog-post_body but includes many embedded w-dyn-list
+  sections for related articles that must be excluded.

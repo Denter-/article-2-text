@@ -65,9 +65,8 @@ func main() {
 		asynq.Config{
 			Concurrency: cfg.Queue.Concurrency,
 			Queues: map[string]int{
-				"critical": 6,
-				"default":  3,
-				"low":      1,
+				"go-worker": 10, // High priority for Go worker
+				"default":   3,  // Fallback for backward compatibility
 			},
 		},
 	)

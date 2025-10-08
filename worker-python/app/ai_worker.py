@@ -15,7 +15,7 @@ from typing import Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from site_registry import SiteRegistry
-from app.database import Database
+from database import Database
 
 # Import settings from parent
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,6 +29,12 @@ class AIWorker:
     
     def __init__(self, db: Database):
         self.db = db
+        
+        # Ensure GEMINI_API_KEY is available
+        if not os.getenv('GEMINI_API_KEY'):
+            from dotenv import load_dotenv
+            load_dotenv('config/.env')
+        
         self.site_registry = SiteRegistry(use_gemini=True)
         logger.info("AI Worker initialized with Gemini learning")
     
@@ -132,10 +138,23 @@ class AIWorker:
                 html_content = self.site_registry.fetch_with_browser(url)
             
             # Extract with config
-            result = self.site_registry.extract_with_config(html_content, config)
+            extracted_html = self.site_registry.extract_with_config(html_content, config)
             
-            if not result or not result.get('content'):
+            if not extracted_html:
                 raise Exception("Failed to extract article content")
+            
+            # Extract metadata from the original HTML
+            metadata = self._extract_metadata(html_content)
+            
+            # Create result dictionary
+            result = {
+                'content': extracted_html,
+                'title': metadata.get('title', 'Untitled'),
+                'author': metadata.get('author', 'Unknown'),
+                'published_date': metadata.get('published_date', ''),
+                'word_count': len(extracted_html.split()),
+                'images': metadata.get('images', [])
+            }
             
             # Save markdown
             self.db.update_job_status(
@@ -167,7 +186,8 @@ class AIWorker:
                 title=result.get('title'),
                 author=result.get('author'),
                 word_count=result.get('word_count', 0),
-                image_count=len(result.get('images', []))
+                image_count=len(result.get('images', [])),
+                markdown_content=markdown
             )
             
             # Mark complete
@@ -195,6 +215,74 @@ class AIWorker:
                 'error': str(e)
             }
     
+    def _extract_metadata(self, html_content: str) -> Dict[str, Any]:
+        """Extract basic metadata from HTML content"""
+        from bs4 import BeautifulSoup
+        
+        soup = BeautifulSoup(html_content, 'html.parser')
+        metadata = {}
+        
+        # Extract title
+        title_tag = soup.find('title')
+        if title_tag:
+            metadata['title'] = title_tag.get_text().strip()
+        
+        # Try to find article title in h1 or other heading tags
+        if not metadata.get('title'):
+            h1_tag = soup.find('h1')
+            if h1_tag:
+                metadata['title'] = h1_tag.get_text().strip()
+        
+        # Extract author
+        author_selectors = [
+            'meta[name="author"]',
+            '[rel="author"]',
+            '.author',
+            '.byline',
+            '[class*="author"]'
+        ]
+        
+        for selector in author_selectors:
+            author_elem = soup.select_one(selector)
+            if author_elem:
+                if author_elem.name == 'meta':
+                    metadata['author'] = author_elem.get('content', '').strip()
+                else:
+                    metadata['author'] = author_elem.get_text().strip()
+                break
+        
+        # Extract published date
+        date_selectors = [
+            'meta[property="article:published_time"]',
+            'meta[name="date"]',
+            'time[datetime]',
+            '.published',
+            '.date'
+        ]
+        
+        for selector in date_selectors:
+            date_elem = soup.select_one(selector)
+            if date_elem:
+                if date_elem.name == 'meta':
+                    metadata['published_date'] = date_elem.get('content', '').strip()
+                elif date_elem.get('datetime'):
+                    metadata['published_date'] = date_elem.get('datetime').strip()
+                else:
+                    metadata['published_date'] = date_elem.get_text().strip()
+                break
+        
+        # Extract images
+        images = []
+        img_tags = soup.find_all('img')
+        for img in img_tags:
+            src = img.get('src')
+            alt = img.get('alt', '')
+            if src:
+                images.append({'src': src, 'alt': alt})
+        metadata['images'] = images
+        
+        return metadata
+
     def _generate_markdown(self, result: Dict[str, Any]) -> str:
         """Generate markdown from extraction result"""
         lines = []

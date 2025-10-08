@@ -23,7 +23,8 @@ try:
     from google import genai
     from google.genai.types import GenerateContentConfig, ThinkingConfig
     from dotenv import load_dotenv
-    load_dotenv()
+    # Load .env from project root (one level up from this file)
+    load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
     GEMINI_AVAILABLE = True
 except ImportError:
     pass

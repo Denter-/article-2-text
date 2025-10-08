@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     redis_password: str = ""
     
     # Queue
-    queue_name: str = "default"
+    queue_name: str = "python-worker"  # Listen to python-worker queue
     worker_concurrency: int = 5
     
     # AI

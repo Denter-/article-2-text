@@ -63,25 +63,19 @@ func (h *Handler) HandleExtractionJob(ctx context.Context, t *asynq.Task) error 
 			Str("domain", job.Domain).
 			Msg("No site config found - forwarding to Python AI worker for learning")
 
-		// Forward to Python AI worker
-		result, err := h.extractor.ForwardToPythonAIWorker(ctx, &job)
+		// Forward to Python AI worker - it will handle everything including completion
+		_, err := h.extractor.ForwardToPythonAIWorker(ctx, &job)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to forward to Python AI worker")
 			h.jobRepo.Fail(ctx, job.ID, fmt.Sprintf("Failed to forward to Python AI worker: %v", err))
 			return err
 		}
 
-		// Update job with Python AI worker result
-		job.ResultPath = &result.Path
-		job.MarkdownContent = &result.Markdown
-		job.Title = &result.Title
-		job.Author = &result.Author
-		job.WordCount = &result.WordCount
-		job.ImageCount = &result.ImageCount
-		job.Status = repository.StatusCompleted
-
-		// Mark job as completed
-		h.jobRepo.Complete(ctx, &job)
+		// Python AI worker has already completed the job and updated the database
+		// No need to do anything else - the job is done
+		log.Info().
+			Str("job_id", job.ID.String()).
+			Msg("✅ Job completed by Python AI worker")
 		return nil
 	}
 
@@ -90,17 +84,58 @@ func (h *Handler) HandleExtractionJob(ctx context.Context, t *asynq.Task) error 
 		Bool("requires_browser", config.RequiresBrowser).
 		Msg("Found site config")
 
-	// For now, we'll proceed with simple extraction even if browser is required
-	// Full browser support will be added in Python worker integration
+	// Debug logging to check the actual value
+	log.Info().
+		Str("domain", job.Domain).
+		Bool("requires_browser", config.RequiresBrowser).
+		Msg("DEBUG: Checking requires_browser value")
+
+	// Explicit check for debugging
+	if config.RequiresBrowser == true {
+		log.Info().
+			Str("domain", job.Domain).
+			Msg("DEBUG: config.RequiresBrowser is TRUE - should forward to Python")
+	} else {
+		log.Info().
+			Str("domain", job.Domain).
+			Bool("requires_browser", config.RequiresBrowser).
+			Msg("DEBUG: config.RequiresBrowser is FALSE - will use Go worker")
+	}
+
+	// If site requires browser, forward to Python AI worker
 	if config.RequiresBrowser {
-		h.jobRepo.UpdateProgress(ctx, job.ID, 10, "Note: Site may require JavaScript (proceeding with static HTML)")
+		log.Info().
+			Str("domain", job.Domain).
+			Msg("Site requires browser - forwarding to Python AI worker")
+
+		h.jobRepo.UpdateProgress(ctx, job.ID, 10, "Forwarding to Python AI worker for browser-based extraction...")
+
+		// Forward to Python AI worker - it will handle everything including completion
+		_, err := h.extractor.ForwardToPythonAIWorker(ctx, &job)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to forward to Python AI worker")
+			h.jobRepo.Fail(ctx, job.ID, fmt.Sprintf("Failed to forward to Python AI worker: %v", err))
+			return err
+		}
+
+		// Python AI worker has already completed the job and updated the database
+		log.Info().
+			Str("job_id", job.ID.String()).
+			Msg("✅ Job completed by Python AI worker (browser-based extraction)")
+		return nil
+	} else {
+		// Debug logging for when config.RequiresBrowser is false
+		log.Info().
+			Str("domain", job.Domain).
+			Bool("requires_browser", config.RequiresBrowser).
+			Msg("DEBUG: requires_browser is FALSE, proceeding with Go worker extraction")
 	}
 
 	// Update progress
 	h.jobRepo.UpdateProgress(ctx, job.ID, 20, "Fetching and parsing HTML...")
 
-	// Extract article
-	result, err := h.extractor.Extract(ctx, &job)
+	// Extract article - pass the config from database
+	result, err := h.extractor.Extract(ctx, &job, config)
 	if err != nil {
 		errMsg := fmt.Sprintf("Extraction failed: %v", err)
 		log.Error().
@@ -110,7 +145,7 @@ func (h *Handler) HandleExtractionJob(ctx context.Context, t *asynq.Task) error 
 
 		h.jobRepo.Fail(ctx, job.ID, errMsg)
 		h.configRepo.UpdateUsageStats(ctx, job.Domain, false, 0)
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	// Update job with results
@@ -140,5 +175,3 @@ func (h *Handler) HandleExtractionJob(ctx context.Context, t *asynq.Task) error 
 
 	return nil
 }
-
-

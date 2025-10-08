@@ -93,7 +93,7 @@ func New(geminiClient *gemini.Client, storagePath, configDir string) *Extractor 
 	}
 }
 
-func (e *Extractor) Extract(ctx context.Context, job *repository.Job) (*ExtractionResult, error) {
+func (e *Extractor) Extract(ctx context.Context, job *repository.Job, dbConfig *repository.SiteConfig) (*ExtractionResult, error) {
 	log.Info().
 		Str("job_id", job.ID.String()).
 		Str("url", job.URL).
@@ -111,13 +111,16 @@ func (e *Extractor) Extract(ctx context.Context, job *repository.Job) (*Extracti
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	// Load site config
-	domain, _ := e.getDomainFromURL(job.URL)
-	config, err := e.loadSiteConfig(domain)
-	if err != nil {
-		log.Warn().Err(err).Str("domain", domain).Msg("Failed to load site config, forwarding to Python AI worker")
-		// Forward to Python AI worker for learning
-		return e.ForwardToPythonAIWorker(ctx, job)
+	// Parse site config from database
+	var config *SiteConfig
+	if dbConfig != nil && dbConfig.ConfigYAML != "" {
+		config = &SiteConfig{}
+		if err := yaml.Unmarshal([]byte(dbConfig.ConfigYAML), config); err != nil {
+			log.Warn().Err(err).Str("domain", job.Domain).Msg("Failed to parse site config from database")
+			config = nil
+		} else {
+			log.Info().Str("domain", job.Domain).Msg("✓ Loaded site config from database")
+		}
 	}
 
 	// Extract article content with config
@@ -153,6 +156,9 @@ func (e *Extractor) Extract(ctx context.Context, job *repository.Job) (*Extracti
 
 	// Process images in parallel
 	descriptions := e.processImagesParallel(ctx, images)
+
+	// Clean HTML before markdown conversion
+	articleDoc = e.cleanHTML(articleDoc)
 
 	// Convert HTML to Markdown
 	markdown := e.htmlToMarkdown(articleDoc, title, author, descriptions)
@@ -227,12 +233,30 @@ func (e *Extractor) ForwardToPythonAIWorker(ctx context.Context, job *repository
 		return nil, fmt.Errorf("Python AI worker failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// The Python AI worker will update the job in the database
-	// We'll return a placeholder result since the Python worker handles everything
+	// Parse the response to get the actual results
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Error   string `json:"error,omitempty"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode Python AI worker response: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("Python AI worker failed: %s", response.Error)
+	}
+
+	// The Python AI worker has completed the job and updated the database
+	// We need to fetch the final job data from the database to get the actual results
+	// For now, return a success indicator - the job is already completed in the database
+	log.Info().Str("job_id", job.ID.String()).Msg("Python AI worker completed job successfully")
+
 	return &ExtractionResult{
-		Path:       "python-ai-worker-handled",
+		Path:       "completed-by-python-ai-worker",
 		Markdown:   "Content extracted by Python AI worker",
-		Title:      "AI Learning in Progress",
+		Title:      "AI Learning Completed",
 		Author:     "",
 		WordCount:  0,
 		ImageCount: 0,
@@ -369,34 +393,98 @@ func (e *Extractor) extractContentWithPattern(htmlContent string, pattern struct
 func (e *Extractor) applyExclusions(sel *goquery.Selection, excludeSelectors []string) string {
 	// Clone the selection
 	html, _ := sel.Html()
+
+	// Validate input HTML
+	if len(html) < 100 {
+		log.Warn().Int("content_length", len(html)).Msg("Input content very short before exclusions")
+	}
+
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader("<div>" + html + "</div>"))
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to parse HTML for exclusions")
 		return html
 	}
 
-	root := doc.Find("div").First()
+	root := doc.Find("div")
 
 	// Use comprehensive default exclusions if none specified
 	if len(excludeSelectors) == 0 {
 		excludeSelectors = DefaultExclusions
+		log.Info().Int("default_rules", len(DefaultExclusions)).Msg("Using default exclusion rules")
 	}
 
-	// Remove excluded elements
+	// Log before exclusions
+	beforeText := strings.TrimSpace(root.Text())
+	beforeWords := len(strings.Fields(beforeText))
+	log.Debug().
+		Int("html_length", len(html)).
+		Int("text_length", len(beforeText)).
+		Int("word_count", beforeWords).
+		Msg("Content metrics before exclusions")
+
+	// Remove excluded elements with detailed logging
 	totalRemoved := 0
+	removedByType := make(map[string]int)
+
 	for _, selector := range excludeSelectors {
 		found := root.Find(selector)
 		count := found.Length()
 		if count > 0 {
+			// Log what we're removing for debugging
+			if selector == ".elementor-widget-container" || selector == ".elementor-widget-theme-post-content" {
+				// Be extra careful with content-containing selectors
+				foundText := strings.TrimSpace(found.Text())
+				foundWords := len(strings.Fields(foundText))
+				log.Warn().
+					Str("selector", selector).
+					Int("removed", count).
+					Int("removed_words", foundWords).
+					Msg("Removing content-containing selector - potential data loss")
+			} else {
+				log.Debug().
+					Str("selector", selector).
+					Int("removed", count).
+					Msg("Removed elements")
+			}
+
 			found.Remove()
 			totalRemoved += count
-			log.Debug().Str("selector", selector).Int("removed", count).Msg("Removed elements")
+			removedByType[selector] = count
 		}
 	}
 
-	log.Info().Int("total_excluded", totalRemoved).Int("exclusion_rules", len(excludeSelectors)).Msg("Applied exclusions")
+	// Log after exclusions
+	afterText := strings.TrimSpace(root.Text())
+	afterWords := len(strings.Fields(afterText))
+	contentLossRatio := float64(beforeWords-afterWords) / float64(beforeWords) * 100
+
+	log.Info().
+		Int("total_removed", totalRemoved).
+		Int("exclusion_rules", len(excludeSelectors)).
+		Int("words_before", beforeWords).
+		Int("words_after", afterWords).
+		Float64("content_loss_percent", contentLossRatio).
+		Msg("Applied exclusions")
+
+	// Alert if we lost too much content
+	if contentLossRatio > 90 && beforeWords > 1000 {
+		log.Error().
+			Float64("content_loss_percent", contentLossRatio).
+			Int("words_before", beforeWords).
+			Int("words_after", afterWords).
+			Msg("CRITICAL: High content loss detected during exclusions")
+	}
 
 	// Get the cleaned HTML
 	cleanedHTML, _ := root.Html()
+
+	// Validate output
+	if len(strings.TrimSpace(cleanedHTML)) < 100 {
+		log.Warn().
+			Int("cleaned_length", len(cleanedHTML)).
+			Msg("Cleaned content very short after exclusions")
+	}
+
 	return cleanedHTML
 }
 
@@ -461,7 +549,20 @@ func (e *Extractor) extractAuthorWithConfig(doc *goquery.Document, config *SiteC
 }
 
 func (e *Extractor) fetchHTML(urlStr string) (string, error) {
-	resp, err := e.httpClient.Get(urlStr)
+	req, err := http.NewRequest("GET", urlStr, nil)
+	if err != nil {
+		return "", err
+	}
+
+	// Add headers to bypass Cloudflare protection
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+
+	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -613,6 +714,11 @@ func (e *Extractor) processImagesParallel(ctx context.Context, images []Image) [
 	return descriptions
 }
 
+// HtmlToMarkdown is a public wrapper for htmlToMarkdown
+func (e *Extractor) HtmlToMarkdown(doc *goquery.Document, title, author string, images []ImageDescription) string {
+	return e.htmlToMarkdown(doc, title, author, images)
+}
+
 func (e *Extractor) htmlToMarkdown(doc *goquery.Document, title, author string, images []ImageDescription) string {
 	var md strings.Builder
 
@@ -630,8 +736,29 @@ func (e *Extractor) htmlToMarkdown(doc *goquery.Document, title, author string, 
 
 	md.WriteString("---\n\n")
 
-	// Convert HTML content to markdown
-	e.convertNode(doc.Selection, &md, 0)
+	// Enhanced content detection and validation
+	bodyContent := e.extractContentFromDocument(doc)
+	if bodyContent == nil || bodyContent.Length() == 0 {
+		log.Warn().Msg("No content found for markdown conversion")
+		return md.String() + "\n\n*No article content was extracted.*\n\n"
+	}
+
+	// Log content statistics for debugging
+	contentHTML, _ := bodyContent.Html()
+	contentText := bodyContent.Text()
+	log.Info().
+		Int("content_html_length", len(contentHTML)).
+		Int("content_text_length", len(contentText)).
+		Int("content_words", len(strings.Fields(contentText))).
+		Msg("Converting content to markdown")
+
+	// Validate content quality before processing
+	if !e.validateContentQuality(contentText) {
+		log.Warn().Int("content_length", len(contentText)).Msg("Content quality validation failed")
+	}
+
+	// Convert HTML content to markdown with proper fragment handling
+	e.convertNodeRecursive(bodyContent, &md, 0)
 
 	// Add images section
 	if len(images) > 0 {
@@ -656,109 +783,330 @@ func (e *Extractor) htmlToMarkdown(doc *goquery.Document, title, author string, 
 	return md.String()
 }
 
-func (e *Extractor) convertNode(sel *goquery.Selection, md *strings.Builder, depth int) {
-	sel.Contents().Each(func(i int, s *goquery.Selection) {
-		nodeName := goquery.NodeName(s)
 
-		switch nodeName {
-		case "#text":
-			text := s.Text()
-			text = strings.TrimSpace(text)
-			if text != "" {
-				md.WriteString(text)
-				md.WriteString(" ")
-			}
+func (e *Extractor) cleanHTML(doc *goquery.Document) *goquery.Document {
+	log.Info().Msg("🧹 Starting HTML cleaning")
 
-		case "h1":
-			e.writeHeading(s, md, 1)
-		case "h2":
-			e.writeHeading(s, md, 2)
-		case "h3":
-			e.writeHeading(s, md, 3)
-		case "h4":
-			e.writeHeading(s, md, 4)
-		case "h5":
-			e.writeHeading(s, md, 5)
-		case "h6":
-			e.writeHeading(s, md, 6)
+	// Remove script, style, and other unwanted elements
+	unwantedSelectors := []string{
+		"script", "style", "noscript", "iframe", "embed", "object",
+		"meta", "link", "title", "head",
+		"nav", "header", "footer", "aside", "form",
+		"input", "button", "select", "textarea", "canvas",
+		"svg", "video", "audio", "source", "track",
+	}
 
-		case "p":
-			md.WriteString("\n\n")
-			e.convertNode(s, md, depth)
-			md.WriteString("\n\n")
+	removedCount := 0
+	for _, selector := range unwantedSelectors {
+		found := doc.Find(selector)
+		count := found.Length()
+		if count > 0 {
+			found.Remove()
+			removedCount += count
+			log.Debug().Str("selector", selector).Int("removed", count).Msg("Removed elements")
+		}
+	}
 
-		case "br":
-			md.WriteString("  \n")
-
-		case "strong", "b":
-			md.WriteString("**")
-			e.convertNode(s, md, depth)
-			md.WriteString("**")
-
-		case "em", "i":
-			md.WriteString("*")
-			e.convertNode(s, md, depth)
-			md.WriteString("*")
-
-		case "code":
-			md.WriteString("`")
-			md.WriteString(s.Text())
-			md.WriteString("`")
-
-		case "pre":
-			md.WriteString("\n\n```\n")
-			md.WriteString(s.Text())
-			md.WriteString("\n```\n\n")
-
-		case "blockquote":
-			md.WriteString("\n\n> ")
-			text := strings.TrimSpace(s.Text())
-			text = strings.ReplaceAll(text, "\n", "\n> ")
-			md.WriteString(text)
-			md.WriteString("\n\n")
-
-		case "ul", "ol":
-			md.WriteString("\n\n")
-			s.Find("li").Each(func(idx int, li *goquery.Selection) {
-				if nodeName == "ul" {
-					md.WriteString("- ")
-				} else {
-					md.WriteString(fmt.Sprintf("%d. ", idx+1))
-				}
-				md.WriteString(strings.TrimSpace(li.Text()))
-				md.WriteString("\n")
-			})
-			md.WriteString("\n")
-
-		case "a":
-			href, exists := s.Attr("href")
-			text := strings.TrimSpace(s.Text())
-			if exists && text != "" {
-				md.WriteString("[")
-				md.WriteString(text)
-				md.WriteString("](")
-				md.WriteString(href)
-				md.WriteString(")")
-			} else if text != "" {
-				md.WriteString(text)
-			}
-
-		case "img":
-			// Images are handled separately in the images section
-			// Skip inline images to avoid duplication
-
-		case "hr":
-			md.WriteString("\n\n---\n\n")
-
-		case "div", "section", "article", "main", "span":
-			// Just process children
-			e.convertNode(s, md, depth)
-
-		default:
-			// For unknown elements, just process children
-			e.convertNode(s, md, depth)
+	// Remove elements with JavaScript patterns in their content
+	jsRemovedCount := 0
+	doc.Find("*").Each(func(i int, s *goquery.Selection) {
+		html, _ := s.Html()
+		// Check if element contains JavaScript patterns
+		if strings.Contains(html, "var ") ||
+			strings.Contains(html, "function(") ||
+			strings.Contains(html, "hbspt.") ||
+			strings.Contains(html, "document.") ||
+			strings.Contains(html, "window.") ||
+			strings.Contains(html, "jQuery") ||
+			strings.Contains(html, "$(") {
+			s.Remove()
+			jsRemovedCount++
 		}
 	})
+
+	// Log content length after cleaning
+	contentAfterCleaning := doc.Text()
+	contentLength := len(strings.TrimSpace(contentAfterCleaning))
+	log.Info().Int("elements_removed", removedCount).Int("js_elements_removed", jsRemovedCount).Int("content_length", contentLength).Msg("HTML cleaning completed")
+
+	return doc
+}
+
+func (e *Extractor) shouldSkipElement(tagName string) bool {
+	// Skip elements that should never be included in markdown
+	skipElements := map[string]bool{
+		"script":   true,
+		"style":    true,
+		"noscript": true,
+		"iframe":   true,
+		"embed":    true,
+		"object":   true,
+		"meta":     true,
+		"link":     true,
+		"title":    true,
+		"head":     true,
+		"html":     true,
+		"body":     true,
+		"nav":      true,
+		"header":   true,
+		"footer":   true,
+		"aside":    true,
+		"form":     true,
+		"input":    true,
+		"button":   true,
+		"select":   true,
+		"textarea": true,
+		"canvas":   true,
+		"svg":      true,
+		"video":    true,
+		"audio":    true,
+		"source":   true,
+		"track":    true,
+	}
+	return skipElements[tagName]
+}
+
+// extractContentFromDocument intelligently extracts content from HTML documents or fragments
+func (e *Extractor) extractContentFromDocument(doc *goquery.Document) *goquery.Selection {
+	// Try body first (full HTML documents)
+	body := doc.Find("body").First()
+	if body.Length() > 0 {
+		bodyHTML, _ := body.Html()
+		if len(bodyHTML) > 100 { // Reasonable content length
+			log.Debug().Msg("Using body content for markdown conversion")
+			return body
+		}
+	}
+
+	// If body is empty or too short, this is likely an HTML fragment
+	// Try common content containers
+	contentSelectors := []string{
+		"article", "main", ".article-content", ".post-content", ".entry-content",
+		".content", "[role='main']", ".elementor-widget-theme-post-content",
+		".elementor-widget-container", ".post", ".entry", ".story",
+	}
+
+	for _, selector := range contentSelectors {
+		sel := doc.Find(selector).First()
+		if sel.Length() > 0 {
+			html, _ := sel.Html()
+			if len(html) > 100 {
+				log.Debug().Str("selector", selector).Int("length", len(html)).Msg("Using content selector")
+				return sel
+			}
+		}
+	}
+
+	// Check if document itself is the content (fragment case)
+	docHTML, _ := doc.Html()
+	if len(docHTML) > 100 {
+		log.Debug().Msg("Using document as content fragment")
+		return doc.Selection
+	}
+
+	// Last resort: find the element with the most text content
+	var bestElement *goquery.Selection
+	maxTextLength := 0
+
+	doc.Find("*").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if len(text) > maxTextLength {
+			maxTextLength = len(text)
+			bestElement = s
+		}
+	})
+
+	if bestElement != nil && maxTextLength > 200 {
+		log.Debug().Int("text_length", maxTextLength).Msg("Using element with most text content")
+		return bestElement
+	}
+
+	log.Warn().Msg("No suitable content found in document")
+	return nil
+}
+
+// validateContentQuality checks if extracted content meets quality thresholds
+func (e *Extractor) validateContentQuality(content string) bool {
+	if len(content) == 0 {
+		return false
+	}
+
+	// Basic content quality checks
+	words := strings.Fields(content)
+	wordCount := len(words)
+	sentenceCount := len(strings.Split(content, "."))
+
+	log.Debug().
+		Int("word_count", wordCount).
+		Int("sentence_count", sentenceCount).
+		Int("char_count", len(content)).
+		Msg("Content quality validation")
+
+	// Check minimum thresholds
+	if wordCount < 50 {
+		log.Warn().Int("word_count", wordCount).Msg("Content too short (less than 50 words)")
+		return false
+	}
+
+	if sentenceCount < 5 {
+		log.Warn().Int("sentence_count", sentenceCount).Msg("Too few sentences (less than 5)")
+		return false
+	}
+
+	// Check for repetitive content (indicates extraction issues)
+	uniqueLines := make(map[string]bool)
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) > 10 {
+			uniqueLines[line] = true
+		}
+	}
+
+	if len(uniqueLines) < len(lines)/2 {
+		log.Warn().Int("unique_lines", len(uniqueLines)).Int("total_lines", len(lines)).Msg("High content repetition detected")
+		return false
+	}
+
+	log.Info().Int("word_count", wordCount).Msg("Content quality validation passed")
+	return true
+}
+
+// convertNodeRecursive handles HTML fragments and ensures recursive processing
+func (e *Extractor) convertNodeRecursive(sel *goquery.Selection, md *strings.Builder, depth int) {
+	if sel == nil || sel.Length() == 0 {
+		return
+	}
+
+	// Prevent infinite recursion
+	if depth > 20 {
+		log.Warn().Int("depth", depth).Msg("Maximum recursion depth exceeded")
+		return
+	}
+
+	// For fragments, process all contents recursively
+	sel.Contents().Each(func(i int, s *goquery.Selection) {
+		e.processNode(s, md, depth+1)
+	})
+}
+
+// processNode handles individual HTML elements with better content preservation
+func (e *Extractor) processNode(sel *goquery.Selection, md *strings.Builder, depth int) {
+	if sel == nil || sel.Length() == 0 {
+		return
+	}
+
+	nodeName := goquery.NodeName(sel)
+
+	// Skip processing if this element should be removed
+	if e.shouldSkipElement(nodeName) {
+		return
+	}
+
+	switch nodeName {
+	case "#text":
+		text := sel.Text()
+		text = strings.TrimSpace(text)
+		if text != "" {
+			md.WriteString(text)
+			// Add space after text unless it's followed by punctuation
+			if !strings.HasSuffix(text, ".") && !strings.HasSuffix(text, ",") &&
+			   !strings.HasSuffix(text, "!") && !strings.HasSuffix(text, "?") {
+				md.WriteString(" ")
+			}
+		}
+
+	case "h1", "h2", "h3", "h4", "h5", "h6":
+		level := 0
+		switch nodeName {
+		case "h1": level = 1
+		case "h2": level = 2
+		case "h3": level = 3
+		case "h4": level = 4
+		case "h5": level = 5
+		case "h6": level = 6
+		}
+		e.writeHeading(sel, md, level)
+
+	case "p":
+		md.WriteString("\n\n")
+		e.convertNodeRecursive(sel, md, depth)
+		md.WriteString("\n\n")
+
+	case "br":
+		md.WriteString("  \n")
+
+	case "strong", "b":
+		md.WriteString("**")
+		e.convertNodeRecursive(sel, md, depth)
+		md.WriteString("**")
+
+	case "em", "i":
+		md.WriteString("*")
+		e.convertNodeRecursive(sel, md, depth)
+		md.WriteString("*")
+
+	case "code":
+		md.WriteString("`")
+		md.WriteString(sel.Text())
+		md.WriteString("`")
+
+	case "pre":
+		md.WriteString("\n\n```\n")
+		md.WriteString(sel.Text())
+		md.WriteString("\n```\n\n")
+
+	case "blockquote":
+		md.WriteString("\n\n> ")
+		text := strings.TrimSpace(sel.Text())
+		text = strings.ReplaceAll(text, "\n", "\n> ")
+		md.WriteString(text)
+		md.WriteString("\n\n")
+
+	case "ul", "ol":
+		md.WriteString("\n\n")
+		sel.Find("li").Each(func(idx int, li *goquery.Selection) {
+			if nodeName == "ul" {
+				md.WriteString("- ")
+			} else {
+				md.WriteString(fmt.Sprintf("%d. ", idx+1))
+			}
+			// Process list item contents properly
+			li.Contents().Each(func(i int, item *goquery.Selection) {
+				e.processNode(item, md, depth+1)
+			})
+			md.WriteString("\n")
+		})
+		md.WriteString("\n")
+
+	case "a":
+		href, exists := sel.Attr("href")
+		text := strings.TrimSpace(sel.Text())
+		if exists && text != "" {
+			md.WriteString("[")
+			md.WriteString(text)
+			md.WriteString("](")
+			md.WriteString(href)
+			md.WriteString(")")
+		} else if text != "" {
+			md.WriteString(text)
+		}
+
+	case "img":
+		// Images are handled separately in the images section
+		// Skip inline images to avoid duplication
+
+	case "hr":
+		md.WriteString("\n\n---\n\n")
+
+	case "div", "section", "article", "main", "span":
+		// Process children recursively to preserve nested content
+		e.convertNodeRecursive(sel, md, depth)
+
+	default:
+		// For unknown elements, process children to preserve content
+		e.convertNodeRecursive(sel, md, depth)
+	}
 }
 
 func (e *Extractor) writeHeading(s *goquery.Selection, md *strings.Builder, level int) {
@@ -808,5 +1156,3 @@ func (e *Extractor) sanitizeFilename(title string) string {
 
 	return filename
 }
-
-

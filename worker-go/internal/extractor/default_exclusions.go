@@ -15,10 +15,11 @@ var DefaultExclusions = []string{
 	"[class*='navbar']", "[id*='navbar']", ".navbar",
 	"[class*='nav-menu']", "[class*='main-menu']",
 
-	// Sidebars and widgets
+	// Sidebars and widgets - be more specific to avoid Elementor content
 	".sidebar", "[class*='sidebar']", "[id*='sidebar']",
-	".widget", "[class*='widget']", "[id*='widget']",
+	".widget", "[id*='widget']",
 	"[class*='sidebar-widget']", "[class*='widget-area']",
+	".widget-sidebar", ".widget-area", ".widget_text", ".widget_nav",
 
 	// Comments and discussions
 	"[id*='comment']", "[class*='comment']", ".comments",
@@ -51,12 +52,11 @@ var DefaultExclusions = []string{
 	"[class*='search']", "[id*='search']", "[role='search']",
 	"[class*='search-box']", "[class*='search-form']",
 
-	// WordPress/Elementor specific
+	// WordPress/Elementor specific - be conservative to preserve article content
 	"[data-elementor-type='header']", "[data-elementor-type='footer']",
 	"[data-elementor-type='sidebar']", "[data-elementor-type='widget']",
 	".elementor-location-header", ".elementor-location-footer",
-	".elementor-location-sidebar", ".elementor-widget-container",
-	"[class*='elementor-widget']", "[class*='elementor-section']",
+	".elementor-location-sidebar",
 
 	// Common CMS elements
 	"[class*='wp-block']", "[class*='gutenberg']",
@@ -93,9 +93,8 @@ var DefaultExclusions = []string{
 	"[class*='author-bio']", "[class*='author-info']",
 	"[class*='author-card']", "[class*='author-box']",
 
-	// Tags and categories (often in sidebars)
+	// Tags and categories (often in sidebars) - be more conservative
 	"[class*='tag']", "[class*='category']", "[class*='taxonomy']",
-	"[class*='post-meta']", "[class*='entry-meta']",
 
 	// Table of contents
 	"[class*='toc']", "[class*='table-of-contents']",
@@ -105,8 +104,7 @@ var DefaultExclusions = []string{
 	"[class*='print']", "[class*='mobile']", "[class*='desktop']",
 	"[class*='hidden']", "[class*='visible']",
 
-	// Generic containers that might be empty or contain UI
-	"[class*='container']", "[class*='wrapper']", "[class*='inner']",
+	// Generic containers that might be empty or contain UI (be more conservative)
 	"[class*='content-wrapper']", "[class*='main-wrapper']",
 
 	// Common non-content classes

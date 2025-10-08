@@ -65,7 +65,7 @@ func main() {
 	defer queueSvc.Close()
 
 	authSvc := service.NewAuthService(userRepo, &cfg.Auth)
-	jobSvc := service.NewJobService(jobRepo, configRepo, userRepo, queueSvc)
+	jobSvc := service.NewJobService(jobRepo, configRepo, userRepo, queueSvc, hub)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authSvc)

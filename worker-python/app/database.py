@@ -49,7 +49,7 @@ class Database:
         with self.get_cursor() as cursor:
             cursor.execute("""
                 SELECT * FROM jobs WHERE id = %s
-            """, (uuid.UUID(job_id),))
+            """, (job_id,))
             return cursor.fetchone()
     
     def update_job_status(self, job_id: str, status: str, 
@@ -75,17 +75,20 @@ class Database:
             updates.append("started_at = NOW()")
         elif status == "completed":
             updates.append("completed_at = NOW()")
-            updates.append("progress_percent = 100")
+            # Only set progress_percent to 100 if no explicit progress was provided
+            if progress is None:
+                updates.append("progress_percent = 100")
         
         query = f"UPDATE jobs SET {', '.join(updates)} WHERE id = %s"
-        params.append(uuid.UUID(job_id))
+        params.append(job_id)
         
         with self.get_cursor() as cursor:
             cursor.execute(query, params)
     
     def update_job_result(self, job_id: str, result_path: str,
                          title: str = None, author: str = None,
-                         word_count: int = None, image_count: int = None):
+                         word_count: int = None, image_count: int = None,
+                         markdown_content: str = None):
         """Update job with extraction results"""
         with self.get_cursor() as cursor:
             cursor.execute("""
@@ -94,9 +97,10 @@ class Database:
                     title = %s,
                     author = %s,
                     word_count = %s,
-                    image_count = %s
+                    image_count = %s,
+                    markdown_content = %s
                 WHERE id = %s
-            """, (result_path, title, author, word_count, image_count, uuid.UUID(job_id)))
+            """, (result_path, title, author, word_count, image_count, markdown_content, job_id))
     
     def get_site_config(self, domain: str) -> Optional[Dict[str, Any]]:
         """Get site configuration by domain"""

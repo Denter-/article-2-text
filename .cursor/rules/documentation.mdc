@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+When investigate some functionality of the code - check documentation starting from index file in /docs/index.md.
+ALWAYS check documentation first if a purpose of some logic in the code isn't clear.
+After making changes and receiving approval that changes was succesfull and will stay - update related documentation files. Create new files in documentation structure, if required, and update index file.
+Enrich code with comments and links to corresponding documentation files.

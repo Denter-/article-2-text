@@ -991,8 +991,8 @@ What selectors should we add or remove?"""
         exclude_selectors = noise_result.get('exclude_selectors', [])
         
         if not exclude_selectors:
-            print(f"❌ No exclusion selectors identified\n")
-            return False, None, "Failed to identify noise categories"
+            print(f"ℹ️  No exclusion selectors identified (clean page)\n")
+            # This is actually fine - some pages don't have noise to exclude
         
         print(f"   Found {len(exclude_selectors)} exclusion selectors\n")
         

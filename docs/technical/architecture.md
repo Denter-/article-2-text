@@ -414,3 +414,6 @@ Potential improvements:
 - [Site Compatibility](site-compatibility.md) - Which sites work
 - [Dynamic Content Detection](dynamic-content-detection.md) - JavaScript handling
 
+
+
+
