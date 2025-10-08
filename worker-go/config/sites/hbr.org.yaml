@@ -1,0 +1,28 @@
+domain: hbr.org
+extraction:
+  article_content:
+    selector: article
+    exclude_selectors:
+    - header
+    - nav
+    - div[class*='Header-module_header']
+    - div[class*='MegaMenu-module_mega-menu']
+    - span[class*='StandardHeadline_headline-topic']
+    - ul[class*='PageUtils_container']
+    - div[class*='ArticlePromo_standard']
+    - div[class*='LPArticleTout_container']
+    - div[class*='RecommendedForYou_container']
+    - div.ecommerce-module
+    - div[class*='RelatedTopics_container']
+    - div[class*='Footer-module_subscribe-link-container']
+    - button.Summary_button__t98CR
+    - section[class*='PartnerCenter-module_container']
+    - div[data-testid="ad-container"]
+    - footer
+    - aside
+    - div[class*="social"]
+    - div[class*="share"]
+    - div[class*="newsletter"]
+notes: 'HBR config for article extraction'
+requires_browser: true
+learned_at: '2025-10-08T15:35:00.000000'

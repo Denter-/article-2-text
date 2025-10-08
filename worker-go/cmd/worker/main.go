@@ -65,8 +65,9 @@ func main() {
 		asynq.Config{
 			Concurrency: cfg.Queue.Concurrency,
 			Queues: map[string]int{
-				"go-worker": 10, // High priority for Go worker
-				"default":   3,  // Fallback for backward compatibility
+				"go-worker": 10,     // High priority for Go worker
+				"python-worker": 5,  // AI learning queue
+				"default":   3,      // Fallback for backward compatibility
 			},
 		},
 	)

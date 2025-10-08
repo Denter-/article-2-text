@@ -3,10 +3,13 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"gopkg.in/yaml.v3"
 )
 
 type JobStatus string
@@ -130,6 +133,7 @@ func NewConfigRepository(db *pgxpool.Pool) *ConfigRepository {
 }
 
 func (r *ConfigRepository) GetByDomain(ctx context.Context, domain string) (*SiteConfig, error) {
+	// First try database lookup
 	config := &SiteConfig{}
 	query := `
 		SELECT domain, config_yaml, requires_browser
@@ -139,10 +143,29 @@ func (r *ConfigRepository) GetByDomain(ctx context.Context, domain string) (*Sit
 	err := r.db.QueryRow(ctx, query, domain).Scan(
 		&config.Domain, &config.ConfigYAML, &config.RequiresBrowser,
 	)
-	if err != nil {
-		return nil, fmt.Errorf("config not found: %w", err)
+	if err == nil {
+		return config, nil
 	}
-	return config, nil
+
+	// If database lookup fails, try filesystem fallback
+	configPath := filepath.Join("config", "sites", domain+".yaml")
+	if yamlData, err := os.ReadFile(configPath); err == nil {
+		var fsConfig struct {
+			Domain          string `yaml:"domain"`
+			RequiresBrowser bool   `yaml:"requires_browser"`
+		}
+
+		if err := yaml.Unmarshal(yamlData, &fsConfig); err == nil {
+			return &SiteConfig{
+				Domain:          fsConfig.Domain,
+				ConfigYAML:      string(yamlData),
+				RequiresBrowser: fsConfig.RequiresBrowser,
+			}, nil
+		}
+	}
+
+	// If both fail, return the original database error
+	return nil, fmt.Errorf("config not found: %w", err)
 }
 
 func (r *ConfigRepository) UpdateUsageStats(ctx context.Context, domain string, success bool, extractionTimeMs int) error {

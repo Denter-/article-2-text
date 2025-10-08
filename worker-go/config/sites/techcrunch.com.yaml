@@ -1,0 +1,28 @@
+domain: techcrunch.com
+extraction:
+  article_content:
+    selector: article
+    exclude_selectors:
+    - header
+    - nav
+    - div[data-testid="ad-container"]
+    - div[class*="ad-"]
+    - div[class*="advertisement"]
+    - div[class*="sponsored"]
+    - div[class*="promo"]
+    - div[class*="newsletter"]
+    - div[class*="social"]
+    - div[class*="share"]
+    - div[class*="related"]
+    - div[class*="recommendations"]
+    - div[class*="comments"]
+    - footer
+    - aside
+    - div[class*="sidebar"]
+    - div[class*="toc"]
+    - div[class*="AuthorCard"]
+    - div[class*="FeaturedIn"]
+    - div[class*="TechCrunch+"]
+notes: 'Basic TechCrunch config for common article layout'
+requires_browser: false
+learned_at: '2025-10-08T14:20:00.000000'
